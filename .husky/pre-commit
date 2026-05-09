@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+set -eu
+
+# thx-linting:start
+pnpm run fix && pnpm exec prek run --hook-stage pre-commit
+# thx-linting:end

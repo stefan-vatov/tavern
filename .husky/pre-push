@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+set -eu
+
+# thx-linting:start
+pnpm run build && pnpm run test:ci && pnpm exec prek run --hook-stage pre-push && pnpm run test:mutation
+# thx-linting:end

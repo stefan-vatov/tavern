@@ -1,0 +1,29 @@
+{
+	"$schema": "https://unpkg.com/knip@6/schema.json",
+	"ignoreIssues": {
+		"src/project-actions.ts": ["exports", "types"],
+		"src/project-library.ts": ["exports", "types"],
+		"src/project-note.ts": ["exports", "types"],
+		"src/project-vault.ts": ["exports", "types"]
+	},
+	"treatConfigHintsAsErrors": true,
+	"workspaces": {
+		".": {
+			"includeEntryExports": true,
+			"entry": [
+				"scripts/set-version.mjs!",
+				"src/main.ts!",
+				"src/project-actions.ts!",
+				"src/project-library.ts!",
+				"src/project-note.ts!",
+				"src/project-vault.ts!"
+			],
+			"project": [
+				"**/*.{js,mjs,cjs,jsx,ts,tsx,mts,cts}!",
+				"!esbuild.config.mjs!",
+				"!test/**!",
+				"!version-bump.mjs!"
+			]
+		}
+	}
+}

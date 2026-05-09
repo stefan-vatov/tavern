@@ -1,0 +1,38 @@
+{
+	"$schema": "./node_modules/oxlint/configuration_schema.json",
+	"categories": {
+		"correctness": "error",
+		"style": "warn",
+		"suspicious": "error"
+	},
+	"ignorePatterns": [
+		"**/node_modules/**",
+		"**/dist/**",
+		"**/build/**",
+		"**/coverage/**",
+		"**/.next/**",
+		"**/.nuxt/**",
+		"**/out/**",
+		"**/out-tsc/**",
+		"**/.turbo/**",
+		"**/.cache/**",
+		"esbuild.config.mjs",
+		"version-bump.mjs"
+	],
+	"options": {
+		"denyWarnings": true,
+		"typeAware": true,
+		"typeCheck": true
+	},
+	"plugins": ["import", "promise"],
+	"rules": {
+		"eslint/no-console": "warn",
+		"eslint/no-new": "off",
+		"eslint/sort-imports": "off",
+		"eslint/sort-keys": "off",
+		"eslint/capitalized-comments": "off",
+		"import/consistent-type-specifier-style": "off",
+		"import/group-exports": "off",
+		"import/no-named-export": "off"
+	}
+}

@@ -1,0 +1,37 @@
+{
+	"$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+	"htmlReporter": {
+		"fileName": "reports/mutation/mutation.html"
+	},
+	"jsonReporter": {
+		"fileName": "reports/mutation/mutation.json"
+	},
+	"packageManager": "pnpm",
+	"plugins": ["@stryker-mutator/vitest-runner", "@stryker-mutator/typescript-checker"],
+	"reporters": ["clear-text", "progress", "html", "json"],
+	"testRunner": "vitest",
+	"thresholds": {
+		"break": 85,
+		"high": 85,
+		"low": 85
+	},
+	"vitest": {
+		"configFile": "vitest.config.mts",
+		"related": true
+	},
+	"mutate": [
+		"src/project-actions.ts",
+		"src/project-board-model.ts",
+		"src/project-library.ts",
+		"src/project-mode.ts",
+		"src/project-note.ts",
+		"src/project-vault.ts",
+		"src/settings-defaults.ts",
+		"src/settings-model.ts"
+	],
+	"mutator": {
+		"excludedMutations": ["StringLiteral"]
+	},
+	"checkers": ["typescript"],
+	"tsconfigFile": "tsconfig.json"
+}

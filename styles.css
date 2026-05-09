@@ -1,0 +1,2871 @@
+.workspace-leaf-content[data-type='tavern-view'] {
+	/*
+	 * Tavern UI styles are locally adapted from the cloned Agentfiles source
+	 * in ../agentfiles/styles.css. Keep selectors Tavern-scoped.
+	 */
+	--tavern-bg: #1a1a1a;
+	--tavern-bg-soft: #202020;
+	--tavern-bg-raised: rgba(255, 255, 255, 0.035);
+	--tavern-bg-hover: rgba(255, 255, 255, 0.04);
+	--tavern-bg-active: rgba(255, 255, 255, 0.075);
+	--tavern-border: rgba(255, 255, 255, 0.1);
+	--tavern-border-soft: rgba(255, 255, 255, 0.065);
+	--tavern-border-strong: rgba(255, 255, 255, 0.16);
+	--tavern-text: rgba(255, 255, 255, 0.92);
+	--tavern-text-muted: rgba(255, 255, 255, 0.58);
+	--tavern-text-faint: rgba(255, 255, 255, 0.34);
+	--tavern-accent: var(--interactive-accent);
+}
+
+.workspace-leaf-content[data-type='tavern-view'] .view-header {
+	display: none;
+}
+
+.workspace-leaf-content[data-type='tavern-view'] .view-content {
+	padding: 0 !important;
+	height: 100%;
+}
+
+.tavern-hidden {
+	display: none !important;
+}
+
+.tavern-container {
+	--tavern-list-width: 320px;
+	background: var(--tavern-bg);
+	display: grid;
+	grid-template-columns: var(--tavern-list-width) 6px 1fr;
+	height: 100%;
+	overflow: hidden;
+	position: relative;
+}
+
+.tavern-panel {
+	overflow-y: auto;
+	height: 100%;
+	background: var(--tavern-bg);
+}
+
+.tavern-panel-list {
+	border-right: 1px solid var(--tavern-border);
+	background: color-mix(in srgb, var(--tavern-bg) 92%, black);
+}
+
+.tavern-panel-detail {
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+.tavern-note-mode {
+	grid-column: 1 / -1;
+}
+
+/* Resize handles */
+.tavern-resize-handle {
+	width: 6px;
+	background: transparent;
+	cursor: col-resize;
+	transition: background 0.15s;
+	z-index: 1;
+}
+
+.tavern-resize-handle:hover,
+.tavern-resize-handle.is-dragging {
+	background: var(--tavern-border-strong);
+}
+
+/* Search */
+.tavern-search {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 12px;
+	border-bottom: 1px solid var(--tavern-border);
+	background: color-mix(in srgb, var(--tavern-bg) 88%, black);
+}
+
+.tavern-search-input {
+	flex: 1;
+	min-width: 0;
+	height: 30px;
+	padding: 5px 10px;
+	border: 1px solid var(--tavern-border);
+	border-radius: 6px;
+	background: var(--tavern-bg-raised);
+	color: var(--tavern-text);
+	caret-color: var(--tavern-text);
+	font-size: var(--font-ui-small);
+	outline: none;
+}
+
+.tavern-search-input:focus {
+	border-color: color-mix(in srgb, var(--tavern-accent) 58%, var(--tavern-border-strong));
+	background: color-mix(in srgb, var(--tavern-bg-raised) 70%, var(--tavern-bg-soft));
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--tavern-accent) 28%, transparent);
+}
+
+.tavern-search-overlay {
+	position: absolute;
+	inset: 0;
+	z-index: 20;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 32px;
+	background: rgba(0, 0, 0, 0.56);
+}
+
+.tavern-search-overlay-panel {
+	width: 960px;
+	height: 640px;
+	max-width: calc(100% - 96px);
+	max-height: calc(100% - 96px);
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding: 14px;
+	border: 1px solid var(--tavern-border-strong);
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--tavern-bg) 92%, black);
+	box-shadow:
+		0 24px 72px rgba(0, 0, 0, 0.45),
+		inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.tavern-search-overlay-input {
+	flex: 0 0 auto;
+	width: 100%;
+	box-sizing: border-box;
+	height: 34px;
+	background: color-mix(in srgb, var(--tavern-bg-raised) 78%, var(--tavern-bg-soft));
+}
+
+.tavern-search-results {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	padding-right: 2px;
+}
+
+.tavern-search-task {
+	grid-template-columns: 18px minmax(0, 1fr) auto;
+	margin-left: calc(var(--tavern-task-depth, 0) * 18px);
+	padding: 8px 10px;
+	border-left: 1px solid transparent;
+}
+
+.tavern-search-task:hover {
+	border-left-color: color-mix(in srgb, var(--tavern-accent) 58%, transparent);
+	background: color-mix(in srgb, var(--tavern-bg-hover) 82%, var(--tavern-bg-soft));
+}
+
+.tavern-search-empty {
+	padding: 24px 10px;
+	color: var(--tavern-text-faint);
+	font-size: var(--font-ui-small);
+	text-align: center;
+}
+
+/* List */
+.tavern-list-items {
+	padding: 6px;
+}
+
+.tavern-list-empty {
+	padding: 22px 14px;
+	text-align: center;
+	color: var(--tavern-text-faint);
+	font-size: var(--font-ui-small);
+}
+
+.tavern-sidebar-section {
+	margin-top: 10px;
+}
+
+.tavern-sidebar-section:first-of-type {
+	margin-top: 8px;
+}
+
+.tavern-sidebar-section-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 0 8px 5px;
+	color: var(--tavern-text-faint);
+	cursor: pointer;
+}
+
+.tavern-sidebar-section-header:hover {
+	color: var(--tavern-text-muted);
+}
+
+.tavern-sidebar-section.is-collapsed {
+	margin-bottom: 8px;
+}
+
+.tavern-sidebar-section-title {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 10px;
+	font-weight: 650;
+	text-transform: uppercase;
+}
+
+.tavern-sidebar-section-count {
+	min-width: 17px;
+	height: 16px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 999px;
+	border: 1px solid var(--tavern-border-soft);
+	color: var(--tavern-text-faint);
+	font-family: var(--font-monospace);
+	font-size: 9px;
+}
+
+.tavern-skill-card {
+	padding: 9px 10px;
+	border: 1px solid transparent;
+	border-radius: 6px;
+	cursor: pointer;
+	margin-bottom: 4px;
+	position: relative;
+	transition:
+		background 0.12s ease,
+		border-color 0.12s ease,
+		box-shadow 0.12s ease;
+}
+
+.tavern-skill-card:hover {
+	background: var(--tavern-bg-hover);
+	border-color: var(--tavern-border);
+}
+
+.tavern-skill-card.is-selected {
+	background: color-mix(in srgb, var(--tavern-bg-active) 86%, var(--tavern-bg-soft));
+	border-color: var(--tavern-border-strong);
+	box-shadow: inset 2px 0 0 color-mix(in srgb, var(--tavern-accent) 70%, white 4%);
+}
+
+.tavern-skill-card.is-selected .tavern-skill-name {
+	color: color-mix(in srgb, var(--tavern-text) 88%, white);
+}
+
+.tavern-skill-header {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+}
+
+.tavern-skill-name {
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+	color: var(--tavern-text);
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tavern-skill-meta {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	margin-top: 4px;
+}
+
+.tavern-tool-svg {
+	display: block;
+}
+
+.tavern-tool-name-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	font-size: var(--font-ui-smaller);
+	padding: 2px 8px;
+	border: 1px solid var(--tool-color);
+	border-radius: 10px;
+	font-weight: 500;
+	white-space: nowrap;
+	color: var(--tool-color);
+	flex-shrink: 0;
+}
+
+/* Detail — toolbar */
+.tavern-detail {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	overflow: hidden;
+}
+
+.tavern-detail-toolbar {
+	padding: 14px 18px 10px;
+	border-bottom: 1px solid var(--tavern-border);
+	background: color-mix(in srgb, var(--tavern-bg) 94%, black);
+	flex-shrink: 0;
+	-webkit-user-select: text;
+	user-select: text;
+}
+
+.tavern-toolbar-top {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.tavern-toolbar-left {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	flex: 1;
+}
+
+.tavern-detail-title {
+	font-size: 18px;
+	font-weight: 650;
+	color: var(--tavern-text);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tavern-toolbar-right {
+	display: flex;
+	gap: 4px;
+	flex-shrink: 0;
+}
+
+.tavern-toolbar-btn {
+	background: none;
+	border: 1px solid var(--tavern-border);
+	border-radius: 6px;
+	width: 28px;
+	height: 28px;
+	padding: 0;
+	cursor: pointer;
+	color: var(--tavern-text-muted);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.tavern-toolbar-btn:hover {
+	background: var(--tavern-bg-hover);
+	border-color: var(--tavern-border-strong);
+	color: var(--tavern-text);
+}
+
+.tavern-toolbar-btn svg {
+	width: 14px;
+	height: 14px;
+}
+
+.tavern-detail-meta-bar {
+	display: flex;
+	gap: 6px;
+	margin-top: 8px;
+	flex-wrap: wrap;
+}
+
+.tavern-meta-item {
+	font-size: var(--font-ui-smaller);
+	color: var(--tavern-text-muted);
+	background: color-mix(in srgb, var(--tavern-bg-raised) 72%, transparent);
+	padding: 2px 7px;
+	border: 1px solid var(--tavern-border-soft);
+	border-radius: 999px;
+}
+
+/* Detail — empty */
+.tavern-detail-empty {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	flex: 1;
+	color: var(--tavern-text-faint);
+	gap: 8px;
+	font-size: var(--font-ui-small);
+}
+
+.tavern-detail-empty-icon svg {
+	width: 48px;
+	height: 48px;
+	opacity: 0.3;
+}
+
+/* Detail — frontmatter */
+.tavern-frontmatter {
+	border-bottom: 1px solid var(--background-modifier-border);
+	padding: 12px 20px;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	background: var(--background-secondary);
+}
+
+.tavern-fm-prop {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	line-height: 1.5;
+}
+
+.tavern-fm-key {
+	color: var(--text-faint);
+	font-weight: 500;
+	white-space: nowrap;
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	min-width: 80px;
+}
+
+.tavern-fm-key::after {
+	content: ':';
+}
+
+.tavern-fm-value {
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tavern-fm-value-long {
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+	line-height: 1.5;
+	display: -webkit-box;
+	-webkit-line-clamp: 3;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+
+/* Detail — body / preview */
+.tavern-detail-body {
+	flex: 1;
+	overflow-y: auto;
+	min-height: 0;
+	padding: 14px 18px 20px;
+	background: var(--tavern-bg);
+	-webkit-user-select: text;
+	user-select: text;
+	cursor: text;
+}
+
+.tavern-detail-preview {
+	padding: 12px 20px;
+}
+
+.tavern-detail-preview pre {
+	background: var(--code-background);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: 12px 16px;
+	overflow-x: auto;
+	position: relative;
+}
+
+.tavern-detail-preview pre code {
+	font-family: var(--font-monospace);
+	font-size: var(--code-size);
+	color: var(--code-normal);
+	background: none;
+	padding: 0;
+	border-radius: 0;
+}
+
+.tavern-detail-preview code {
+	font-family: var(--font-monospace);
+	font-size: var(--code-size);
+	color: var(--code-normal);
+	background: var(--code-background);
+	padding: 2px 4px;
+	border-radius: var(--radius-s);
+}
+
+.tavern-detail-preview .copy-code-button {
+	position: absolute;
+	top: 6px;
+	right: 6px;
+	padding: 4px 8px;
+	font-size: var(--font-smallest);
+	background: var(--background-modifier-hover);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	color: var(--text-muted);
+	cursor: pointer;
+	opacity: 0;
+	transition: opacity 0.15s;
+}
+
+.tavern-detail-preview pre:hover .copy-code-button {
+	opacity: 1;
+}
+
+/* Detail — editor */
+.tavern-detail-body-editor {
+	display: flex;
+	flex-direction: column;
+}
+
+.tavern-editor-cm {
+	flex: 1;
+	min-height: 0;
+	overflow: hidden;
+}
+
+.tavern-editor-cm .cm-editor {
+	height: 100%;
+}
+
+.tavern-editor-cm .cm-editor.cm-focused {
+	outline: none;
+}
+
+.tavern-save-bar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 16px;
+	border-top: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	flex-shrink: 0;
+}
+
+.tavern-save-btn {
+	padding: 4px 16px;
+	border-radius: var(--radius-s);
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border: none;
+	cursor: pointer;
+	font-size: var(--font-ui-small);
+	font-weight: 500;
+}
+
+.tavern-save-btn:hover {
+	opacity: 0.9;
+}
+
+.tavern-save-hint {
+	font-size: var(--font-smallest);
+	color: var(--text-faint);
+}
+
+/* Skillkit usage badges */
+.tavern-usage-badge {
+	font-size: 10px;
+	padding: 1px 5px;
+	border-radius: var(--radius-s);
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+}
+
+.tavern-badge-stale {
+	font-size: 10px;
+	padding: 1px 5px;
+	border-radius: var(--radius-s);
+	background: var(--background-modifier-error);
+	color: var(--text-on-accent);
+	font-weight: 500;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+}
+
+.tavern-badge-heavy {
+	font-size: 10px;
+	padding: 1px 5px;
+	border-radius: var(--radius-s);
+	background: var(--color-yellow);
+	color: var(--background-primary);
+	font-weight: 500;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+}
+
+/* Detail usage bar */
+.tavern-detail-usage-bar {
+	display: flex;
+	gap: 8px;
+	margin-top: 4px;
+	align-items: center;
+}
+
+.tavern-usage-stat {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-accent);
+	font-weight: 500;
+}
+
+/* Skillkit CTA */
+.tavern-skillkit-cta {
+	margin: 8px 8px 0;
+	padding: 10px 12px;
+	border-radius: var(--radius-s);
+	border: 1px dashed var(--background-modifier-border);
+	background: var(--background-secondary);
+}
+
+.tavern-skillkit-icon {
+	color: var(--text-faint);
+	margin-bottom: 4px;
+}
+
+.tavern-skillkit-icon svg {
+	width: 16px;
+	height: 16px;
+}
+
+.tavern-skillkit-title {
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+	color: var(--text-normal);
+	margin-bottom: 2px;
+}
+
+.tavern-skillkit-desc {
+	font-size: var(--font-smallest);
+	color: var(--text-muted);
+	line-height: 1.4;
+	margin-bottom: 6px;
+}
+
+.tavern-skillkit-cmd {
+	margin-bottom: 4px;
+}
+
+.tavern-skillkit-cmd code {
+	font-size: var(--font-smallest);
+	font-family: var(--font-monospace);
+	background: var(--code-background);
+	padding: 2px 6px;
+	border-radius: var(--radius-s);
+	color: var(--code-normal);
+}
+
+.tavern-skillkit-link {
+	font-size: var(--font-smallest);
+	color: var(--text-accent);
+	cursor: pointer;
+	text-decoration: none;
+}
+
+.tavern-skillkit-link:hover {
+	text-decoration: underline;
+}
+
+/* Dashboard panel */
+.tavern-panel-dashboard {
+	grid-column: 2 / -1;
+	overflow-y: auto;
+	padding: 12px 28px 20px;
+	container-type: inline-size;
+}
+
+.tavern-dash-loading {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	padding: 80px 0;
+	gap: 12px;
+}
+
+.tavern-dash-spinner {
+	width: 24px;
+	height: 24px;
+	border: 2px solid var(--background-modifier-border);
+	border-top-color: var(--interactive-accent);
+	border-radius: 50%;
+	animation: tavern-spin 0.6s linear infinite;
+}
+
+@keyframes tavern-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+.tavern-dash-loading-text {
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+}
+
+.tavern-dash-empty {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	padding: 60px 20px;
+	text-align: center;
+	color: var(--text-muted);
+}
+
+.tavern-dash-empty-icon svg {
+	width: 48px;
+	height: 48px;
+	opacity: 0.3;
+	margin-bottom: 12px;
+}
+
+.tavern-dash-empty h3 {
+	margin: 0 0 4px;
+	color: var(--text-normal);
+}
+
+.tavern-dash-empty p {
+	margin: 0 0 12px;
+	font-size: var(--font-ui-small);
+}
+
+.tavern-dash-install-cmd {
+	margin-bottom: 8px;
+}
+
+.tavern-dash-install-cmd code {
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	background: var(--code-background);
+	padding: 4px 10px;
+	border-radius: var(--radius-s);
+}
+
+/* Dashboard layout */
+.tavern-dash-row {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 20px;
+}
+
+@container (max-width: 600px) {
+	.tavern-dash-row {
+		grid-template-columns: 1fr;
+	}
+	.tavern-dash-stats {
+		grid-template-columns: repeat(2, 1fr) !important;
+	}
+}
+
+/* Dashboard sections */
+.tavern-dash-section {
+	margin-bottom: 24px;
+}
+
+.tavern-dash-title {
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--text-muted);
+	margin-bottom: 10px;
+}
+
+/* Stat cards */
+.tavern-dash-stats {
+	display: grid;
+	grid-template-columns: repeat(4, 1fr);
+	gap: 10px;
+}
+
+.tavern-dash-stats-sm {
+	grid-template-columns: repeat(4, 1fr);
+}
+
+.tavern-stat-card {
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: 12px;
+	text-align: center;
+}
+
+.tavern-stat-icon {
+	color: var(--text-faint);
+	margin-bottom: 4px;
+}
+
+.tavern-stat-icon svg {
+	width: 16px;
+	height: 16px;
+}
+
+.tavern-stat-value {
+	font-size: 20px;
+	font-weight: 700;
+	color: var(--text-normal);
+	font-variant-numeric: tabular-nums;
+}
+
+.tavern-stat-label {
+	font-size: var(--font-smallest);
+	color: var(--text-muted);
+	margin-top: 2px;
+}
+
+/* Bar chart */
+.tavern-dash-bars {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.tavern-bar-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.tavern-bar-name {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-normal);
+	width: 140px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: var(--font-monospace);
+}
+
+.tavern-bar-wrap {
+	flex: 1;
+	height: 16px;
+	background: var(--background-secondary);
+	border-radius: var(--radius-s);
+	overflow: hidden;
+}
+
+.tavern-bar-fill {
+	height: 100%;
+	width: var(--bar-w, 0%);
+	background: var(--interactive-accent);
+	border-radius: var(--radius-s);
+	min-width: 2px;
+	transition: width 0.3s;
+}
+
+.tavern-bar-count {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	width: 32px;
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+
+/* Health donut */
+.tavern-dash-health-row {
+	display: flex;
+	gap: 20px;
+	align-items: center;
+}
+
+.tavern-donut {
+	width: 80px;
+	height: 80px;
+	border-radius: 50%;
+	background: conic-gradient(
+		var(--interactive-accent) calc(var(--pct) * 1%),
+		var(--background-modifier-border) calc(var(--pct) * 1%)
+	);
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	position: relative;
+	flex-shrink: 0;
+}
+
+.tavern-donut::before {
+	content: '';
+	position: absolute;
+	width: 56px;
+	height: 56px;
+	border-radius: 50%;
+	background: var(--background-primary);
+}
+
+.tavern-donut-label {
+	font-size: 16px;
+	font-weight: 700;
+	color: var(--text-normal);
+	position: relative;
+	z-index: 1;
+}
+
+.tavern-donut-sub {
+	font-size: var(--font-smallest);
+	color: var(--text-muted);
+	position: relative;
+	z-index: 1;
+}
+
+.tavern-health-details {
+	flex: 1;
+}
+
+.tavern-health-line {
+	font-size: var(--font-ui-small);
+	color: var(--text-normal);
+	margin-bottom: 4px;
+}
+
+.tavern-health-warn {
+	color: var(--text-error);
+}
+
+.tavern-budget-bar {
+	height: 6px;
+	background: var(--background-modifier-border);
+	border-radius: 3px;
+	overflow: hidden;
+	margin: 6px 0;
+}
+
+.tavern-budget-fill {
+	height: 100%;
+	width: var(--bar-w, 0%);
+	background: var(--interactive-accent);
+	border-radius: 3px;
+	transition: width 0.3s;
+}
+
+.tavern-budget-over {
+	background: var(--text-error);
+}
+
+/* Burn chart */
+.tavern-burn-chart {
+	display: flex;
+	align-items: flex-end;
+	gap: 4px;
+	height: 100px;
+	margin-top: 12px;
+}
+
+.tavern-burn-col {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	height: 100%;
+	justify-content: flex-end;
+}
+
+.tavern-burn-bar {
+	width: 100%;
+	height: var(--bar-h, 2%);
+	background: var(--interactive-accent);
+	border-radius: 2px 2px 0 0;
+	min-height: 2px;
+	transition: height 0.3s;
+	cursor: default;
+}
+
+.tavern-burn-date {
+	font-size: 9px;
+	color: var(--text-faint);
+	margin-top: 4px;
+}
+
+/* Model breakdown */
+.tavern-model-breakdown {
+	margin-top: 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.tavern-model-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: var(--font-ui-smaller);
+}
+
+.tavern-model-name {
+	color: var(--text-normal);
+	font-family: var(--font-monospace);
+	flex: 1;
+}
+
+.tavern-model-calls {
+	color: var(--text-muted);
+}
+
+.tavern-model-cost {
+	color: var(--text-accent);
+	font-weight: 500;
+}
+
+/* Context tax */
+.tavern-ctx-bar {
+	display: flex;
+	height: 20px;
+	border-radius: var(--radius-s);
+	overflow: hidden;
+	margin-bottom: 8px;
+}
+
+.tavern-ctx-part {
+	height: 100%;
+	width: var(--bar-w, 0%);
+	cursor: default;
+}
+
+.tavern-ctx-claude {
+	background: var(--interactive-accent);
+}
+.tavern-ctx-skills {
+	background: var(--color-yellow);
+}
+.tavern-ctx-memory {
+	background: var(--color-green);
+}
+
+.tavern-ctx-legend {
+	display: flex;
+	gap: 16px;
+	margin-bottom: 10px;
+}
+
+.tavern-ctx-legend-item {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.tavern-ctx-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 2px;
+	display: inline-block;
+}
+
+.tavern-ctx-costs {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.tavern-ctx-costs div {
+	margin-bottom: 2px;
+}
+
+.tavern-ctx-savings {
+	color: var(--color-green);
+	font-weight: 500;
+}
+
+/* Stale list */
+.tavern-stale-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+
+.tavern-stale-item {
+	font-size: var(--font-ui-smaller);
+	padding: 2px 8px;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	color: var(--text-muted);
+}
+
+.tavern-stale-more {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	padding: 2px 8px;
+}
+
+.tavern-stale-hint {
+	margin-top: 8px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+}
+
+.tavern-stale-hint code {
+	font-family: var(--font-monospace);
+	background: var(--code-background);
+	padding: 1px 4px;
+	border-radius: var(--radius-s);
+}
+
+/* Warning and conflict badges */
+.tavern-badge-warn {
+	font-size: 10px;
+	padding: 1px 5px;
+	border-radius: var(--radius-s);
+	background: var(--color-orange);
+	color: var(--background-primary);
+	font-weight: 500;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+}
+
+.tavern-badge-conflict {
+	font-size: 10px;
+	padding: 1px 5px;
+	border-radius: var(--radius-s);
+	background: var(--background-modifier-error);
+	color: var(--text-on-accent);
+	font-weight: 500;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+}
+
+/* Detail: warnings section */
+.tavern-warnings {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 20px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.tavern-warnings-icon {
+	color: var(--color-orange);
+	flex-shrink: 0;
+}
+
+.tavern-warnings-icon svg {
+	width: 12px;
+	height: 12px;
+}
+
+.tavern-warnings-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 12px;
+}
+
+.tavern-warnings-item {
+	font-size: var(--font-smallest);
+	color: var(--color-orange);
+}
+
+/* Detail: usage section */
+.tavern-usage-section {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 8px 20px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.tavern-usage-left {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+}
+
+.tavern-usage-count {
+	font-size: 20px;
+	font-weight: 700;
+	color: var(--text-normal);
+}
+
+.tavern-usage-label {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.tavern-usage-last {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+}
+
+.tavern-usage-spark {
+	color: var(--interactive-accent);
+}
+
+.tavern-sparkline {
+	display: block;
+}
+
+/* Detail: section titles */
+.tavern-section-title {
+	font-size: var(--font-smallest);
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--text-muted);
+	margin-bottom: 6px;
+}
+
+/* Detail: conflicts section */
+.tavern-conflicts-section {
+	padding: 10px 20px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.tavern-conflict-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 4px;
+}
+
+.tavern-conflict-name {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-normal);
+	font-family: var(--font-monospace);
+	width: 140px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tavern-conflict-bar-wrap {
+	flex: 1;
+	height: 6px;
+	background: var(--background-modifier-border);
+	border-radius: 3px;
+	overflow: hidden;
+}
+
+.tavern-conflict-bar {
+	height: 100%;
+	width: var(--bar-w, 0%);
+	background: var(--background-modifier-error);
+	border-radius: 3px;
+}
+
+.tavern-conflict-score {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	width: 32px;
+	text-align: right;
+}
+
+/* Detail: traces section */
+.tavern-traces-section {
+	padding: 10px 20px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.tavern-traces-table {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.tavern-trace-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: var(--font-ui-smaller);
+}
+
+.tavern-trace-date {
+	color: var(--text-muted);
+	width: 50px;
+}
+
+.tavern-trace-model {
+	color: var(--text-normal);
+	font-family: var(--font-monospace);
+	width: 60px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.tavern-trace-tokens {
+	color: var(--text-muted);
+	width: 40px;
+	text-align: right;
+}
+
+.tavern-trace-cost {
+	color: var(--text-accent);
+	width: 50px;
+	text-align: right;
+}
+
+.tavern-trace-duration {
+	color: var(--text-faint);
+	width: 40px;
+	text-align: right;
+}
+
+.tavern-traces-hint {
+	font-size: var(--font-smallest);
+	color: var(--text-faint);
+	font-family: var(--font-monospace);
+	margin-top: 6px;
+}
+
+/* Detail: prune action */
+.tavern-prune-section {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 20px;
+	background: color-mix(in srgb, var(--background-modifier-error) 10%, transparent);
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.tavern-prune-btn {
+	padding: 4px 12px;
+	border-radius: var(--radius-s);
+	background: var(--background-modifier-error);
+	color: var(--text-on-accent);
+	border: none;
+	cursor: pointer;
+	font-size: var(--font-ui-smaller);
+	font-weight: 500;
+}
+
+.tavern-prune-btn:hover {
+	opacity: 0.9;
+}
+
+.tavern-prune-hint {
+	font-size: var(--font-smallest);
+	color: var(--text-faint);
+}
+
+/* Dashboard: action buttons */
+.tavern-dash-title-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 10px;
+}
+
+.tavern-dash-title-row .tavern-dash-title {
+	margin-bottom: 0;
+}
+
+.tavern-action-btn {
+	padding: 4px 12px;
+	border-radius: var(--radius-s);
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border: none;
+	cursor: pointer;
+	font-size: var(--font-ui-smaller);
+	font-weight: 500;
+}
+
+.tavern-action-btn:hover {
+	opacity: 0.9;
+}
+
+.tavern-action-btn:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.tavern-toolbar-btn-danger:hover {
+	color: var(--text-error);
+	border-color: var(--text-error);
+}
+
+.tavern-action-btn.tavern-action-btn-danger {
+	background: var(--background-modifier-error);
+	color: var(--text-on-accent);
+}
+
+.tavern-dash-updated {
+	font-size: 10px;
+	color: var(--text-faint);
+}
+
+/* Confirm modal */
+.tavern-confirm-modal {
+	padding: 0;
+}
+
+.tavern-confirm-title {
+	font-size: var(--font-ui-medium);
+	font-weight: 600;
+	color: var(--text-normal);
+	margin: 0 0 8px;
+}
+
+.tavern-confirm-message {
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+	margin: 0 0 16px;
+}
+
+.tavern-confirm-buttons {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+}
+
+.tavern-confirm-cancel {
+	padding: 6px 16px;
+	border-radius: var(--radius-s);
+	border: 1px solid var(--background-modifier-border);
+	background: none;
+	color: var(--text-normal);
+	cursor: pointer;
+	font-size: var(--font-ui-small);
+}
+
+.tavern-confirm-cancel:hover {
+	background: var(--background-modifier-hover);
+}
+
+.tavern-confirm-action {
+	padding: 6px 16px;
+	border-radius: var(--radius-s);
+	border: none;
+	background: var(--background-modifier-error);
+	color: var(--text-on-accent);
+	cursor: pointer;
+	font-size: var(--font-ui-small);
+	font-weight: 500;
+}
+
+.tavern-confirm-action:hover {
+	opacity: 0.9;
+}
+
+/* Dashboard action bar */
+.tavern-dash-action-bar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 16px;
+	padding-bottom: 12px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.tavern-dash-action-buttons {
+	display: flex;
+	gap: 6px;
+}
+
+/* Dashboard streak and velocity */
+.tavern-dash-streak-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-top: 10px;
+	font-size: var(--font-ui-small);
+}
+
+.tavern-streak-value {
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+.tavern-streak-fire {
+	font-size: 10px;
+	padding: 1px 6px;
+	border-radius: var(--radius-s);
+	background: var(--color-orange);
+	color: var(--background-primary);
+	font-weight: 500;
+	text-transform: uppercase;
+}
+
+.tavern-streak-longest {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+}
+
+.tavern-dash-velocity-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-top: 4px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.tavern-velocity-vs {
+	color: var(--text-faint);
+}
+
+.tavern-velocity-up {
+	color: var(--color-red);
+	font-weight: 500;
+}
+
+.tavern-velocity-down {
+	color: var(--color-green);
+	font-weight: 500;
+}
+
+.tavern-install-detected {
+	font-size: 10px;
+	padding: 1px 6px;
+	border-radius: 10px;
+	background: var(--background-modifier-hover);
+	color: var(--text-faint);
+	margin-left: 6px;
+	font-weight: 400;
+}
+
+.tavern-install-agent-placeholder {
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	background: repeating-linear-gradient(
+		-45deg,
+		var(--interactive-accent),
+		var(--interactive-accent) 2px,
+		transparent 2px,
+		transparent 4px
+	);
+}
+
+.tavern-install-modal .setting-item-heading > .setting-item-name {
+	padding-left: 0 !important;
+}
+
+.tavern-install-scroll {
+	max-height: 300px;
+	overflow-y: auto;
+	margin-bottom: 12px;
+}
+
+.tavern-install-scroll .setting-item {
+	padding: 8px 0;
+	border: none;
+}
+
+.tavern-install-footer {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	padding-top: 8px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+/* Filter dropdown */
+
+/* Active filter indicator */
+.tavern-active-filter {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 4px 8px;
+	margin: 4px 4px 0;
+	font-size: var(--font-smallest);
+	color: var(--text-muted);
+	background: var(--background-secondary);
+	border-radius: var(--radius-s);
+}
+
+.tavern-filter-clear {
+	color: var(--text-accent);
+	cursor: pointer;
+	font-weight: 500;
+}
+
+.tavern-filter-clear:hover {
+	text-decoration: underline;
+}
+
+.tavern-create-modal {
+	width: 420px;
+	max-width: 90vw;
+}
+
+.tavern-create-modal .modal-content {
+	padding: 0;
+}
+
+.tavern-create-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 16px;
+}
+
+.tavern-create-back {
+	cursor: pointer;
+	opacity: 0.5;
+	display: flex;
+	align-items: center;
+	border-radius: var(--radius-s);
+	padding: 4px;
+}
+
+.tavern-create-back:hover {
+	opacity: 1;
+	background: var(--background-modifier-hover);
+}
+
+.tavern-create-title {
+	font-size: var(--font-ui-medium);
+	font-weight: 600;
+}
+
+.tavern-create-subtitle {
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+	margin-bottom: 12px;
+}
+
+.tavern-create-grid {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 8px;
+}
+
+.tavern-create-card {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 8px;
+	padding: 16px 8px;
+	border-radius: var(--radius-m);
+	border: 1px solid var(--background-modifier-border);
+	cursor: pointer;
+	transition: all 0.15s;
+}
+
+.tavern-create-card:hover {
+	border-color: var(--tool-color);
+	background: var(--background-modifier-hover);
+}
+
+.tavern-create-card-icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 40px;
+	height: 40px;
+	border-radius: var(--radius-m);
+	background: var(--background-secondary);
+}
+
+.tavern-create-card-name {
+	font-size: var(--font-ui-small);
+	font-weight: 500;
+	text-align: center;
+}
+
+.tavern-create-type-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+	gap: 8px;
+}
+
+.tavern-create-type-card {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 8px;
+	padding: 20px 12px;
+	border-radius: var(--radius-m);
+	border: 1px solid var(--background-modifier-border);
+	cursor: pointer;
+	transition: all 0.15s;
+}
+
+.tavern-create-type-card:hover {
+	border-color: var(--tool-color);
+	background: var(--background-modifier-hover);
+}
+
+.tavern-create-type-icon {
+	color: var(--text-muted);
+}
+
+.tavern-create-type-card:hover .tavern-create-type-icon {
+	color: var(--tool-color);
+}
+
+.tavern-create-type-label {
+	font-size: var(--font-ui-small);
+	font-weight: 500;
+	text-transform: capitalize;
+}
+
+.tavern-create-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 10px;
+	border-radius: var(--radius-l);
+	background: var(--background-secondary);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	margin-bottom: 16px;
+}
+
+.tavern-create-badge-icon {
+	display: flex;
+	align-items: center;
+}
+
+.tavern-create-input-wrap {
+	margin-bottom: 16px;
+}
+
+.tavern-create-input {
+	width: 100%;
+	padding: 10px 12px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: var(--font-ui-medium);
+	font-family: var(--font-monospace);
+	outline: none;
+	transition: border-color 0.15s;
+}
+
+.tavern-create-input:focus {
+	border-color: var(--tool-color, var(--interactive-accent));
+}
+
+.tavern-create-actions {
+	display: flex;
+	justify-content: flex-end;
+}
+
+.tavern-create-submit {
+	padding: 8px 20px;
+	border-radius: var(--radius-m);
+	border: none;
+	background: var(--tool-color, var(--interactive-accent));
+	color: white;
+	font-weight: 500;
+	cursor: pointer;
+	font-size: var(--font-ui-small);
+	transition: opacity 0.15s;
+}
+
+.tavern-create-submit:hover {
+	opacity: 0.9;
+}
+
+/* Wrapper for swapping content inside grid cells */
+.tavern-wrapper {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	overflow-y: auto;
+	overflow-x: hidden;
+}
+
+/* ===== Conversation Explorer ===== */
+
+/* Search row actions (date + tag dropdowns + sort) */
+.tavern-conv-search-actions {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	flex-shrink: 0;
+}
+
+/* Icon buttons (date, tag, sort) */
+.tavern-conv-icon-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	border-radius: 6px;
+	background: transparent;
+	border: none;
+	color: var(--text-muted);
+	cursor: pointer;
+	transition: all 0.12s ease;
+}
+
+.tavern-conv-icon-btn:hover {
+	color: var(--text-normal);
+	background: var(--background-secondary);
+}
+
+.tavern-conv-icon-btn.has-active {
+	color: var(--text-on-accent);
+	background: var(--interactive-accent);
+}
+
+.tavern-conv-icon-btn.has-active:hover {
+	opacity: 0.85;
+	background: var(--interactive-accent);
+}
+
+.tavern-conv-icon-btn.is-disabled {
+	opacity: 0.35;
+	cursor: default;
+}
+
+.tavern-conv-icon-btn.is-disabled:hover {
+	color: var(--text-muted);
+	background: transparent;
+}
+
+.tavern-conv-icon-btn-icon {
+	display: flex;
+}
+
+.tavern-conv-icon-btn-icon svg {
+	width: 14px;
+	height: 14px;
+}
+
+/* Shared dropdown */
+.tavern-conv-dropdown-wrap {
+	position: relative;
+}
+
+.tavern-conv-dropdown {
+	display: none;
+	position: absolute;
+	top: calc(100% + 4px);
+	right: 0;
+	z-index: 100;
+	width: 200px;
+	max-height: 280px;
+	overflow-y: auto;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	box-shadow:
+		0 4px 16px rgba(0, 0, 0, 0.12),
+		0 1px 4px rgba(0, 0, 0, 0.08);
+	padding: 4px;
+}
+
+.tavern-conv-dropdown.is-open {
+	display: block;
+}
+
+.tavern-conv-dropdown-item {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 5px 8px;
+	border-radius: 5px;
+	font-size: 11.5px;
+	color: var(--text-muted);
+	cursor: pointer;
+	transition: background 0.1s ease;
+}
+
+.tavern-conv-dropdown-item:hover {
+	background: var(--background-secondary);
+	color: var(--text-normal);
+}
+
+.tavern-conv-dropdown-item.is-active {
+	color: var(--text-normal);
+	font-weight: 500;
+}
+
+.tavern-conv-dropdown-check {
+	width: 14px;
+	height: 14px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	color: var(--interactive-accent);
+}
+
+.tavern-conv-dropdown-check svg {
+	width: 12px;
+	height: 12px;
+}
+
+.tavern-conv-dropdown-item-label {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tavern-conv-dropdown-item-count {
+	font-size: 10px;
+	color: var(--text-faint);
+	flex-shrink: 0;
+}
+
+.tavern-conv-dropdown-wide {
+	width: 180px;
+}
+
+.tavern-conv-dropdown-header {
+	font-size: 10px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--text-faint);
+	padding: 6px 8px 2px;
+}
+
+.tavern-conv-dropdown-clear {
+	color: var(--text-faint);
+	border-bottom: 1px solid var(--background-modifier-border);
+	margin-bottom: 2px;
+	padding-bottom: 6px;
+}
+
+.tavern-conv-dropdown-clear:hover {
+	color: var(--text-error);
+}
+
+.tavern-conv-dropdown-item-icon {
+	display: flex;
+	align-items: center;
+}
+
+.tavern-conv-dropdown-item-icon svg {
+	width: 12px;
+	height: 12px;
+}
+
+/* Row 2: active filters strip (only shows when filters applied) */
+.tavern-conv-toolbar {
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.tavern-conv-toolbar:empty {
+	display: none;
+}
+
+.tavern-conv-tag-strip {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 4px 10px;
+	overflow-x: auto;
+	scrollbar-width: none;
+}
+
+.tavern-conv-tag-strip::-webkit-scrollbar {
+	display: none;
+}
+
+.tavern-conv-result-count {
+	font-size: 11px;
+	color: var(--text-faint);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+	flex-shrink: 0;
+}
+
+.tavern-conv-tag-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	padding: 1px 8px;
+	border-radius: 99px;
+	font-size: 10.5px;
+	color: var(--text-muted);
+	background: transparent;
+	border: 1px solid var(--background-modifier-border);
+	cursor: pointer;
+	transition: all 0.12s ease;
+	white-space: nowrap;
+	flex-shrink: 0;
+}
+
+.tavern-conv-tag-pill.is-active {
+	color: var(--interactive-accent);
+	background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
+	border-color: color-mix(in srgb, var(--interactive-accent) 30%, transparent);
+}
+
+.tavern-conv-tag-pill-x {
+	display: flex;
+	align-items: center;
+}
+
+.tavern-conv-tag-pill-x svg {
+	width: 10px;
+	height: 10px;
+}
+
+.tavern-conv-tag-clear {
+	color: var(--text-faint);
+	border-color: transparent;
+}
+
+.tavern-conv-tag-clear:hover {
+	color: var(--text-error);
+}
+
+/* Date group headers */
+.tavern-conv-date-header {
+	font-size: var(--font-smallest);
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--text-faint);
+	padding: 10px 12px 4px;
+}
+
+/* Conversation card overrides */
+.tavern-conv-list .tavern-skill-card {
+	padding: 10px 12px;
+	margin-bottom: 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+	border-radius: 0;
+}
+
+.tavern-conv-list .tavern-skill-card:last-child {
+	border-bottom: none;
+}
+
+/* Tags */
+.tavern-conv-tags {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 3px;
+	margin-top: 6px;
+}
+
+.tavern-conv-tag {
+	font-size: 10px;
+	padding: 1px 6px;
+	border-radius: 10px;
+	background: var(--background-secondary);
+	color: var(--text-muted);
+	border: 1px solid var(--background-modifier-border);
+}
+
+.tavern-conv-tag-custom {
+	background: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+	color: var(--interactive-accent);
+	border-color: color-mix(in srgb, var(--interactive-accent) 30%, transparent);
+}
+
+.tavern-conv-tag-more {
+	color: var(--text-faint);
+	font-style: italic;
+}
+
+.tavern-conv-tag-add {
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	padding: 1px 4px;
+}
+
+.tavern-conv-tag-add:hover {
+	background: var(--background-modifier-hover);
+}
+
+.tavern-conv-tag-add svg {
+	width: 10px;
+	height: 10px;
+}
+
+.tavern-conv-tag-remove {
+	cursor: pointer;
+	display: inline-flex;
+	align-items: center;
+	margin-left: 2px;
+	opacity: 0.6;
+}
+
+.tavern-conv-tag-remove:hover {
+	opacity: 1;
+}
+
+.tavern-conv-tag-remove svg {
+	width: 8px;
+	height: 8px;
+}
+
+.tavern-conv-tag-input {
+	font-size: 10px;
+	padding: 1px 6px;
+	border-radius: 10px;
+	border: 1px solid var(--interactive-accent);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	outline: none;
+	width: 80px;
+}
+
+/* Detail tags bar */
+.tavern-conv-detail-tags {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	padding: 6px 16px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+/* Selection bar */
+.tavern-conv-selection-bar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 8px 16px;
+	background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
+	border-bottom: 1px solid color-mix(in srgb, var(--interactive-accent) 30%, transparent);
+	border-radius: var(--radius-s);
+	margin: 8px 16px;
+	font-size: var(--font-ui-smaller);
+	color: var(--interactive-accent);
+	font-weight: 500;
+}
+
+.tavern-conv-save-selected-btn {
+	padding: 4px 12px;
+	border-radius: var(--radius-s);
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border: none;
+	cursor: pointer;
+	font-size: var(--font-ui-smaller);
+	font-weight: 500;
+}
+
+.tavern-conv-save-selected-btn:hover {
+	opacity: 0.9;
+}
+
+/* Messages */
+.tavern-conv-msg {
+	padding: 10px 20px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	transition: background 0.15s;
+}
+
+.tavern-conv-msg:hover {
+	background: var(--background-secondary-alt);
+}
+
+.tavern-conv-msg-selected {
+	background: color-mix(in srgb, var(--interactive-accent) 8%, transparent) !important;
+	border-left: 3px solid var(--interactive-accent);
+	padding-left: 17px;
+}
+
+.tavern-conv-msg-human {
+	/* subtle differentiation */
+}
+
+.tavern-conv-msg-assistant {
+	background: var(--background-secondary);
+}
+
+.tavern-conv-msg-header {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 6px;
+}
+
+.tavern-conv-msg-role-icon {
+	display: flex;
+	align-items: center;
+	color: var(--text-muted);
+}
+
+.tavern-conv-msg-role-icon svg {
+	width: 14px;
+	height: 14px;
+}
+
+.tavern-conv-msg-role {
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+.tavern-conv-msg-time {
+	font-size: var(--font-smallest);
+	color: var(--text-faint);
+	margin-left: auto;
+}
+
+.tavern-conv-msg-select {
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	color: var(--text-faint);
+	margin-left: 4px;
+}
+
+.tavern-conv-msg-select:hover {
+	color: var(--interactive-accent);
+}
+
+.tavern-conv-msg-select svg {
+	width: 14px;
+	height: 14px;
+}
+
+.tavern-conv-msg-content {
+	font-size: var(--font-ui-small);
+	color: var(--text-normal);
+	line-height: 1.5;
+	overflow-x: auto;
+}
+
+.tavern-conv-msg-content p {
+	margin: 0 0 4px;
+}
+
+.tavern-conv-msg-content pre {
+	background: var(--code-background);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: 8px 12px;
+	overflow-x: auto;
+	font-size: var(--code-size);
+}
+
+/* Tool call badges */
+.tavern-conv-msg-tools {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 3px;
+	margin-top: 6px;
+}
+
+.tavern-conv-tool-badge {
+	font-size: 9px;
+	padding: 1px 5px;
+	border-radius: var(--radius-s);
+	background: var(--background-modifier-border);
+	color: var(--text-faint);
+	font-family: var(--font-monospace);
+}
+
+/* Show more */
+.tavern-conv-show-more {
+	display: flex;
+	gap: 8px;
+	justify-content: center;
+	padding: 12px 20px;
+}
+
+.tavern-conv-show-more-btn,
+.tavern-conv-show-all-btn {
+	padding: 6px 16px;
+	border-radius: var(--radius-s);
+	border: 1px solid var(--background-modifier-border);
+	background: none;
+	color: var(--text-muted);
+	cursor: pointer;
+	font-size: var(--font-ui-smaller);
+}
+
+.tavern-conv-show-more-btn:hover,
+.tavern-conv-show-all-btn:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.tavern-conv-show-more-btn {
+	flex: 1;
+}
+
+.tavern-conv-show-all-btn {
+	color: var(--text-faint);
+	font-size: var(--font-smallest);
+}
+
+/* Resume section */
+.tavern-conv-resume-section {
+	padding: 12px 20px;
+	border-top: 1px solid var(--background-modifier-border);
+	margin-top: 8px;
+}
+
+.tavern-conv-resume-cmd {
+	display: block;
+	margin-top: 6px;
+	padding: 8px 12px;
+	background: var(--code-background);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	font-family: var(--font-monospace);
+	font-size: var(--code-size);
+	color: var(--text-normal);
+	cursor: pointer;
+}
+
+.tavern-conv-resume-cmd:hover {
+	background: var(--background-modifier-hover);
+}
+
+/* Primary toolbar button */
+.tavern-toolbar-btn-primary {
+	color: var(--interactive-accent) !important;
+}
+
+.tavern-toolbar-btn-primary:hover {
+	background: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+}
+
+.tavern-project-lists {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+}
+
+.tavern-project-filter {
+	display: flex;
+	align-items: center;
+	margin: 0 0 10px;
+	padding: 0 0 10px;
+	border-bottom: 1px solid var(--tavern-border-soft);
+}
+
+.tavern-project-filter-input {
+	width: 100%;
+	max-width: none;
+	background: var(--tavern-bg-raised);
+	border-color: var(--tavern-border-soft);
+}
+
+.tavern-project-filter-input:focus {
+	border-color: color-mix(in srgb, var(--interactive-accent) 52%, var(--tavern-border-strong));
+	background: color-mix(in srgb, var(--tavern-bg-raised) 70%, var(--tavern-bg-soft));
+}
+
+.tavern-project-section {
+	border-top: 1px solid var(--tavern-border-soft);
+	padding: 12px 0 14px;
+	transition:
+		background 0.12s ease,
+		border-color 0.12s ease,
+		padding 0.12s ease;
+}
+
+.tavern-project-section:first-child {
+	border-top: 0;
+	padding-top: 0;
+}
+
+.tavern-project-section.is-drop-target {
+	border: 1px solid var(--interactive-accent);
+	border-radius: var(--radius-s);
+	background: color-mix(in srgb, var(--interactive-accent) 9%, var(--tavern-bg-soft));
+	padding: 12px 8px 14px;
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 22%, transparent);
+}
+
+.tavern-project-section.is-drop-target .tavern-project-section-header::after {
+	content: 'Drop here';
+	color: var(--text-accent);
+	font-size: var(--font-smallest);
+	font-family: var(--font-monospace);
+	text-transform: uppercase;
+}
+
+.tavern-project-section-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	margin-bottom: 7px;
+}
+
+.tavern-project-section-heading {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+
+.tavern-project-section-toggle {
+	width: 22px;
+	height: 22px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border: 1px solid var(--tavern-border);
+	border-radius: 6px;
+	background: transparent;
+	color: var(--tavern-text-muted);
+	cursor: pointer;
+	flex-shrink: 0;
+}
+
+.tavern-project-section-toggle:hover {
+	color: var(--tavern-text);
+	background: var(--tavern-bg-hover);
+	border-color: var(--tavern-border-strong);
+}
+
+.tavern-project-section-toggle svg {
+	width: 13px;
+	height: 13px;
+}
+
+.tavern-project-section-title {
+	font-size: var(--font-ui-smaller);
+	font-weight: 650;
+	color: color-mix(in srgb, var(--tavern-text-muted) 82%, white);
+	text-transform: uppercase;
+	letter-spacing: 0;
+}
+
+.tavern-project-section-count {
+	min-width: 20px;
+	height: 18px;
+	padding: 0 6px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 999px;
+	border: 1px solid var(--tavern-border);
+	background: color-mix(in srgb, var(--tavern-bg-raised) 55%, transparent);
+	color: var(--tavern-text-faint);
+	font-family: var(--font-monospace);
+	font-size: 10px;
+}
+
+.tavern-project-task {
+	--tavern-task-depth: 0;
+	display: grid;
+	grid-template-columns: 18px minmax(0, 1fr) auto auto;
+	gap: 9px;
+	align-items: center;
+	border: 1px solid transparent;
+	border-top-color: color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
+	border-radius: 0;
+	background: transparent;
+	padding: 6px 8px 6px calc(8px + min(var(--tavern-task-depth) * 24px, 192px));
+	cursor: grab;
+	position: relative;
+	transition:
+		background 0.12s ease,
+		opacity 0.12s ease,
+		border-color 0.12s ease,
+		box-shadow 0.12s ease;
+}
+
+.tavern-project-task.is-in-global-queue {
+	border-left-color: transparent;
+	background: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-modifier-hover));
+	box-shadow: inset 2px 0 0 color-mix(in srgb, var(--interactive-accent) 74%, white 4%);
+}
+
+.tavern-project-task.is-dragging-task {
+	opacity: 0.45;
+}
+
+.tavern-project-task.is-nested {
+	border-top-color: color-mix(in srgb, var(--background-modifier-border) 74%, transparent);
+}
+
+.tavern-project-task.is-nested::before,
+.tavern-focus-task.is-nested::before {
+	content: '';
+	position: absolute;
+	left: calc(8px + min(var(--tavern-task-depth) * 24px, 192px) - 13px);
+	top: 4px;
+	bottom: 4px;
+	width: 1px;
+	background: var(--background-modifier-border);
+	opacity: 0.52;
+}
+
+.tavern-project-task.is-done,
+.tavern-focus-task.is-done {
+	opacity: 0.46;
+	background: transparent;
+}
+
+.tavern-project-task.is-done:hover,
+.tavern-focus-task.is-done:hover {
+	opacity: 0.64;
+	background: color-mix(in srgb, var(--background-modifier-hover) 45%, transparent);
+}
+
+.tavern-project-task.is-done .tavern-project-task-text,
+.tavern-project-task.is-done .tavern-global-task-project,
+.tavern-focus-task.is-done .tavern-focus-task-text,
+.tavern-focus-task.is-done .tavern-focus-task-project {
+	color: var(--tavern-text-faint);
+	font-weight: 500;
+}
+
+.tavern-project-task.is-done .tavern-project-task-pin,
+.tavern-focus-task.is-done .tavern-project-task-pin {
+	opacity: 0.58;
+}
+
+.tavern-project-section-header + .tavern-project-task {
+	border-top-color: transparent;
+}
+
+.tavern-project-task:hover {
+	border-color: color-mix(in srgb, var(--background-modifier-border-hover) 82%, transparent);
+	border-radius: var(--radius-s);
+	background: color-mix(in srgb, var(--background-modifier-hover) 78%, transparent);
+}
+
+.tavern-project-task.is-drop-before {
+	border-top-color: var(--interactive-accent);
+	box-shadow: inset 0 2px 0 var(--interactive-accent);
+	background: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-modifier-hover));
+}
+
+.tavern-project-task.is-drop-after {
+	box-shadow: inset 0 -2px 0 var(--interactive-accent);
+	background: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-modifier-hover));
+}
+
+.tavern-project-task.is-drop-child {
+	box-shadow:
+		inset 3px 0 0 var(--interactive-accent),
+		inset 0 -2px 0 color-mix(in srgb, var(--interactive-accent) 76%, transparent);
+	background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-modifier-hover));
+}
+
+.tavern-project-task.is-drop-child::after {
+	content: '';
+	position: absolute;
+	right: 8px;
+	bottom: 2px;
+	left: calc(32px + min(var(--tavern-task-depth) * 24px, 192px));
+	height: 2px;
+	border-radius: 999px;
+	background: var(--interactive-accent);
+}
+
+.tavern-project-task:active {
+	cursor: grabbing;
+}
+
+.tavern-project-task input {
+	margin: 0;
+	accent-color: var(--tavern-accent);
+}
+
+.tavern-project-task-text {
+	font-size: var(--font-ui-small);
+	font-weight: 580;
+	line-height: 1.4;
+	color: var(--tavern-text);
+	overflow-wrap: anywhere;
+}
+
+.tavern-editable-task-text {
+	border-radius: var(--radius-s);
+	cursor: text;
+	min-width: 0;
+}
+
+.tavern-editable-task-text:hover {
+	color: var(--text-normal);
+	background: color-mix(in srgb, var(--background-modifier-hover) 65%, transparent);
+}
+
+.tavern-editable-task-text.is-editing {
+	background: transparent;
+}
+
+.tavern-task-edit-input {
+	width: 100%;
+	min-width: 0;
+	height: 28px;
+	padding: 3px 7px;
+	border: 1px solid var(--interactive-accent);
+	border-radius: var(--radius-s);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+	font-weight: 560;
+	outline: none;
+}
+
+.tavern-project-task-pin {
+	min-width: 24px;
+	height: 24px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 5px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	background: transparent;
+	color: var(--text-muted);
+	cursor: pointer;
+	transition:
+		background 0.12s ease,
+		border-color 0.12s ease;
+}
+
+.tavern-project-task-pin.is-selected {
+	color: var(--text-accent);
+	background: var(--background-modifier-hover);
+	border-color: var(--interactive-accent);
+}
+
+.tavern-project-task-pin:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+	border-color: var(--background-modifier-border-hover);
+}
+
+.tavern-project-task-pin svg {
+	width: 14px;
+	height: 14px;
+	flex-shrink: 0;
+}
+
+.tavern-queue-toggle {
+	width: auto;
+	min-width: 68px;
+	padding: 0 8px;
+	color: var(--text-muted);
+	font-size: var(--font-smallest);
+	font-weight: 600;
+}
+
+.tavern-queue-toggle.is-selected {
+	color: var(--text-accent);
+	border-color: var(--interactive-accent);
+	background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+}
+
+.tavern-queue-toggle-remove {
+	min-width: 78px;
+}
+
+.tavern-queue-toggle-label {
+	line-height: 1;
+}
+
+.tavern-project-task-reorder {
+	display: inline-flex;
+	gap: 2px;
+	opacity: 0;
+	transition: opacity 0.12s ease;
+}
+
+.tavern-project-task:hover .tavern-project-task-reorder,
+.tavern-project-task:focus-within .tavern-project-task-reorder {
+	opacity: 1;
+}
+
+.tavern-project-task-reorder-btn {
+	width: 24px;
+	height: 24px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	background: transparent;
+	color: var(--text-muted);
+	cursor: pointer;
+	opacity: 0.72;
+}
+
+.tavern-project-task-reorder-btn:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+	border-color: var(--background-modifier-border-hover);
+}
+
+.tavern-project-task-reorder-btn svg {
+	width: 14px;
+	height: 14px;
+}
+
+.tavern-add-task {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 28px;
+	gap: 6px;
+	align-items: center;
+	margin-top: 8px;
+	padding: 0 8px;
+	opacity: 0.72;
+	transition: opacity 0.12s ease;
+}
+
+.tavern-project-section:hover .tavern-add-task,
+.tavern-add-task:focus-within {
+	opacity: 1;
+}
+
+.tavern-add-task-input {
+	width: 100%;
+	min-width: 0;
+	height: 28px;
+	padding: 4px 8px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	background: color-mix(in srgb, var(--tavern-bg-raised) 72%, transparent);
+	color: var(--tavern-text);
+	font-size: var(--font-ui-small);
+	outline: none;
+}
+
+.tavern-add-task-input:focus {
+	border-color: var(--background-modifier-border-hover);
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 35%, transparent);
+}
+
+.tavern-add-task-button {
+	width: 28px;
+	height: 28px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border: 1px solid transparent;
+	border-radius: var(--radius-s);
+	background: color-mix(in srgb, var(--tavern-bg-raised) 88%, transparent);
+	color: var(--text-muted);
+	cursor: pointer;
+	opacity: 0.68;
+}
+
+.tavern-add-task-button:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+	border-color: var(--background-modifier-border-hover);
+	opacity: 1;
+}
+
+.tavern-add-task-button svg {
+	width: 14px;
+	height: 14px;
+}
+
+.tavern-markdown-preamble {
+	margin-bottom: 12px;
+	padding-bottom: 2px;
+}
+
+.tavern-markdown-line {
+	font-size: var(--font-ui-small);
+	line-height: 1.45;
+	color: var(--tavern-text-muted);
+	margin-bottom: 6px;
+}
+
+.tavern-focus-queue {
+	border: 1px solid var(--tavern-border);
+	border-radius: var(--radius-s);
+	background: color-mix(in srgb, var(--background-secondary) 78%, var(--tavern-bg-raised));
+	padding: 12px 16px;
+	margin-bottom: 16px;
+	min-height: 148px;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+	transition:
+		background 0.12s ease,
+		border-color 0.12s ease;
+}
+
+.tavern-focus-queue.is-drop-target {
+	border-color: var(--interactive-accent);
+	background: var(--background-modifier-hover);
+}
+
+.tavern-focus-queue.is-drop-target .tavern-focus-queue-header::after {
+	content: 'Drop to add';
+	margin-left: auto;
+	color: var(--text-accent);
+	font-size: var(--font-smallest);
+	font-family: var(--font-monospace);
+	text-transform: uppercase;
+}
+
+.tavern-focus-queue-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+
+.tavern-focus-queue-title {
+	font-size: var(--font-ui-medium);
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+.tavern-focus-task {
+	--tavern-task-depth: 0;
+	display: grid;
+	grid-template-columns: 18px minmax(0, 1fr) minmax(100px, 0.22fr) auto;
+	gap: 10px;
+	align-items: center;
+	border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
+	padding: 9px 0 9px min(var(--tavern-task-depth) * 24px, 192px);
+	cursor: grab;
+	position: relative;
+	transition:
+		background 0.12s ease,
+		border-color 0.12s ease,
+		box-shadow 0.12s ease;
+}
+
+.tavern-focus-task:hover {
+	background: color-mix(in srgb, var(--background-modifier-hover) 70%, transparent);
+	box-shadow: inset 2px 0 0 var(--tavern-border-strong);
+}
+
+.tavern-focus-task.is-drop-before {
+	border-top-color: var(--interactive-accent);
+	box-shadow: inset 0 2px 0 var(--interactive-accent);
+	background: var(--background-modifier-hover);
+}
+
+.tavern-focus-task:active {
+	cursor: grabbing;
+}
+
+.tavern-focus-task-project {
+	font-size: var(--font-ui-smaller);
+	color: var(--tavern-text-faint);
+	overflow-wrap: anywhere;
+}
+
+.tavern-focus-task-text {
+	font-size: var(--font-ui-small);
+	font-weight: 650;
+	color: var(--tavern-text);
+	overflow-wrap: anywhere;
+}
+
+.tavern-global-task {
+	grid-template-columns: 18px minmax(0, 1fr) auto;
+	cursor: default;
+}
+
+.tavern-global-task-content {
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.tavern-global-task-project {
+	color: var(--tavern-text-faint);
+	font-size: var(--font-ui-smaller);
+	font-weight: 400;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tavern-global-task-section.is-collapsed {
+	padding-bottom: 12px;
+}
+
+.tavern-project-section.is-empty {
+	padding-bottom: 8px;
+}

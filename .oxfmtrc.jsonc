@@ -1,0 +1,19 @@
+{
+	"$schema": "./node_modules/oxfmt/configuration_schema.json",
+	"ignorePatterns": [
+		"node_modules",
+		"dist",
+		"build",
+		"coverage",
+		".next",
+		".nuxt",
+		".turbo",
+		"out",
+		"out-tsc",
+	],
+	"printWidth": 100,
+	"semi": true,
+	"singleQuote": true,
+	"tabWidth": 2,
+	"trailingComma": "all",
+}
