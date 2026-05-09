@@ -354,6 +354,36 @@ tavern: project
 			expect(selectedProjectTasks(library, ['missing'])).toEqual([]);
 			expect(taskSelectionKey(undefined)).toBe('');
 		});
+
+		it('should expand selected parent tasks to their nested task tree', () => {
+			const library = Effect.runSync(
+				buildProjectLibrary({
+					folders: ['04_Projects'],
+					files: [
+						buildFile({
+							markdown: `---
+Title: Nested
+tavern: project
+---
+# Nested
+
+## Backlog
+
+- [ ] Parent task
+  - [ ] Child task
+    - [ ] Grandchild task
+- [ ] Next task
+`,
+						}),
+					],
+				}),
+			);
+			const parentTask = projectTasks(library).find((task) => task.text === 'Parent task');
+
+			expect(
+				selectedProjectTasks(library, [taskSelectionKey(parentTask)]).map((task) => task.text),
+			).toEqual(['Parent task', 'Child task', 'Grandchild task']);
+		});
 	});
 
 	describe('filterTasks', () => {

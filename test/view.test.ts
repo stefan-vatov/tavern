@@ -30,6 +30,20 @@ tavern: project
 - [ ] Draft post
 `;
 
+const NESTED_MARKDOWN = `---
+Title: Pi
+tavern: project
+---
+# Pi
+
+## Backlog
+
+- [ ] Parent task
+  - [ ] Child task
+    - [ ] Grandchild task
+- [ ] Next task
+`;
+
 type Listener = (event: any) => void;
 
 class FakeStyle {
@@ -1918,6 +1932,85 @@ tavern: project
 		expect(settings.boardTaskKeys).toEqual(['04_Projects/Pi.md::backlog-1-build-board']);
 	});
 
+	it('should persist dragged task trees in the focus queue', async () => {
+		const saveSettings = vi.fn();
+		const settings = {
+			boardTaskKeys: [] as string[],
+			projectFolders: ['04_Projects'],
+			tavernName: 'Tavern',
+		};
+		const view = new TavernView({} as never, {
+			saveSettings,
+			settings,
+			vault: createVault({
+				'04_Projects/Pi.md': NESTED_MARKDOWN,
+			}),
+		});
+		const dragData = new Map<string, string>();
+
+		await view.onOpen();
+		const root = rootElements.at(-1) as FakeElement;
+		const parentTask = findByAriaLabel(root, 'Complete Parent task')?.parent;
+		const focusQueue = findByClass(root, 'tavern-focus-queue');
+		if (!parentTask || !focusQueue) {
+			throw new Error('parent task or focus queue was not rendered');
+		}
+
+		parentTask.dispatch('dragstart', {
+			dataTransfer: {
+				setData: (type: string, value: string) => dragData.set(type, value),
+			},
+		});
+		focusQueue.dispatch('drop', {
+			dataTransfer: { getData: (type: string) => dragData.get(type) ?? '' },
+			preventDefault: vi.fn(),
+		});
+		await vi.waitFor(() => expect(saveSettings).toHaveBeenCalledTimes(1));
+
+		expect(settings.boardTaskKeys).toEqual([
+			'04_Projects/Pi.md::backlog-1-parent-task',
+			'04_Projects/Pi.md::backlog-2-child-task',
+			'04_Projects/Pi.md::backlog-3-grandchild-task',
+		]);
+	});
+
+	it('should restore persisted focus queue task trees when tavern reopens', async () => {
+		const settings = {
+			boardTaskKeys: ['04_Projects/Pi.md::backlog-1-parent-task'],
+			projectFolders: ['04_Projects'],
+			tavernName: 'Tavern',
+		};
+		const vault = createVault({
+			'04_Projects/Pi.md': NESTED_MARKDOWN,
+		});
+
+		await new TavernView({} as never, {
+			saveSettings: vi.fn(),
+			settings,
+			vault,
+		}).onOpen();
+		await new TavernView({} as never, {
+			saveSettings: vi.fn(),
+			settings,
+			vault,
+		}).onOpen();
+
+		const root = rootElements.at(-1) as FakeElement;
+		const parentRow = findByAriaLabel(root, 'Complete Parent task')?.parent;
+		const childRow = findByAriaLabel(root, 'Complete Child task')?.parent;
+		const grandchildRow = findByAriaLabel(root, 'Complete Grandchild task')?.parent;
+		if (!parentRow || !childRow || !grandchildRow) {
+			throw new Error('focus queue tree was not restored');
+		}
+
+		expect(parentRow.classes.has('tavern-focus-task')).toBe(true);
+		expect(childRow.classes.has('tavern-focus-task')).toBe(true);
+		expect(grandchildRow.classes.has('tavern-focus-task')).toBe(true);
+		expect(parentRow.style.getPropertyValue('--tavern-task-depth')).toBe('0');
+		expect(childRow.style.getPropertyValue('--tavern-task-depth')).toBe('1');
+		expect(grandchildRow.style.getPropertyValue('--tavern-task-depth')).toBe('2');
+	});
+
 	it('should mark focus queue drop targets while dragging', async () => {
 		const view = new TavernView({} as never, {
 			saveSettings: vi.fn(),
@@ -1999,6 +2092,54 @@ tavern: project
 		expect(settings.boardTaskKeys).toEqual([
 			'04_Projects/Blogging.md::backlog-1-draft-post',
 			'04_Projects/Pi.md::backlog-1-build-board',
+		]);
+	});
+
+	it('should reorder focus queue task trees as a block', async () => {
+		const saveSettings = vi.fn();
+		const settings = {
+			boardTaskKeys: [
+				'04_Projects/Pi.md::backlog-4-next-task',
+				'04_Projects/Pi.md::backlog-1-parent-task',
+				'04_Projects/Pi.md::backlog-2-child-task',
+				'04_Projects/Pi.md::backlog-3-grandchild-task',
+			],
+			projectFolders: ['04_Projects'],
+			tavernName: 'Tavern',
+		};
+		const view = new TavernView({} as never, {
+			saveSettings,
+			settings,
+			vault: createVault({
+				'04_Projects/Pi.md': NESTED_MARKDOWN,
+			}),
+		});
+		const dragData = new Map<string, string>();
+
+		await view.onOpen();
+		const root = rootElements.at(-1) as FakeElement;
+		const parentRow = findByAriaLabel(root, 'Complete Parent task')?.parent;
+		const nextRow = findByAriaLabel(root, 'Complete Next task')?.parent;
+		if (!parentRow || !nextRow) {
+			throw new Error('focus queue rows were not rendered');
+		}
+
+		parentRow.dispatch('dragstart', {
+			dataTransfer: {
+				setData: (type: string, value: string) => dragData.set(type, value),
+			},
+		});
+		nextRow.dispatch('drop', {
+			dataTransfer: { getData: (type: string) => dragData.get(type) ?? '' },
+			preventDefault: vi.fn(),
+		});
+		await vi.waitFor(() => expect(saveSettings).toHaveBeenCalledTimes(1));
+
+		expect(settings.boardTaskKeys).toEqual([
+			'04_Projects/Pi.md::backlog-1-parent-task',
+			'04_Projects/Pi.md::backlog-2-child-task',
+			'04_Projects/Pi.md::backlog-3-grandchild-task',
+			'04_Projects/Pi.md::backlog-4-next-task',
 		]);
 	});
 

@@ -45,14 +45,6 @@ const addTaskToFocusQueue = (boardTaskKeys: string[], key: string): string[] => 
 	return [...boardTaskKeys, key];
 };
 
-const removeTaskFromFocusQueue = (boardTaskKeys: string[], key: string): string[] => {
-	if (key.length === EMPTY_LENGTH) {
-		return boardTaskKeys;
-	}
-
-	return boardTaskKeys.filter((item) => item !== key);
-};
-
 const selectedProject = (
 	library: ProjectLibrary,
 	selectedPath: string,
@@ -60,4 +52,4 @@ const selectedProject = (
 	library.projects.find((project) => project.path === selectedPath) ??
 	library.projects[FIRST_PROJECT_INDEX];
 
-export { addTaskToFocusQueue, createProjectBoardModel, removeTaskFromFocusQueue };
+export { addTaskToFocusQueue, createProjectBoardModel };

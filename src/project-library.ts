@@ -103,11 +103,18 @@ const selectedProjectTasks = (
 	library: ProjectLibrary,
 	selectedTaskKeys: string[],
 ): ProjectBoardTask[] => {
-	const tasksByKey = new Map(
-		projectTasks(library).map((task) => [taskSelectionKey(task), task] as const),
-	);
+	const tasks = projectTasks(library);
+	const tasksByKey = new Map(tasks.map((task) => [taskSelectionKey(task), task] as const));
+	const expandedTaskKeys = selectedTaskKeys.flatMap((key) => {
+		const task = tasksByKey.get(key);
+		if (!task) {
+			return [key];
+		}
 
-	return selectedTaskKeys
+		return taskTreeKeys(tasks, task);
+	});
+
+	return [...new Set(expandedTaskKeys)]
 		.map((key) => tasksByKey.get(key))
 		.filter((task): task is ProjectBoardTask => task !== undefined);
 };
@@ -118,6 +125,44 @@ const taskSelectionKey = (task: ProjectBoardTask | undefined): string => {
 	}
 
 	return `${task.projectPath}::${task.id}`;
+};
+
+const taskTreeKeys = (tasks: ProjectBoardTask[], task: ProjectBoardTask): string[] => {
+	const projectTasksInSection = sortedSectionTasks(tasks, task);
+	const taskIndex = projectTasksInSection.findIndex((candidate) => candidate.id === task.id);
+	if (taskIndex < 0) {
+		return [taskSelectionKey(task)];
+	}
+
+	return taskTreeKeysFromIndex(projectTasksInSection, taskIndex, task);
+};
+
+const sortedSectionTasks = (
+	tasks: ProjectBoardTask[],
+	task: ProjectBoardTask,
+): ProjectBoardTask[] =>
+	tasks
+		.filter(
+			(candidate) =>
+				candidate.projectPath === task.projectPath && candidate.sectionName === task.sectionName,
+		)
+		.sort((left, right) => left.lineIndex - right.lineIndex);
+
+const taskTreeKeysFromIndex = (
+	projectTasksInSection: ProjectBoardTask[],
+	taskIndex: number,
+	task: ProjectBoardTask,
+): string[] => {
+	const keys = [taskSelectionKey(task)];
+	const baseIndent = indentWidth(task.indent);
+	for (const candidate of projectTasksInSection.slice(taskIndex + 1)) {
+		if (indentWidth(candidate.indent) <= baseIndent) {
+			break;
+		}
+		keys.push(taskSelectionKey(candidate));
+	}
+
+	return keys;
 };
 
 const projectSummary = (path: string, note: ProjectNote): ProjectSummary => ({
@@ -227,6 +272,8 @@ const normalizeSearch = (value: string): string =>
 		.replace(/\s+/g, ' ')
 		.trim();
 
+const indentWidth = (indent: string): number => indent.replace(/\t/g, '    ').length;
+
 export {
 	buildProjectLibrary,
 	filterProjects,
@@ -234,6 +281,7 @@ export {
 	projectTasks,
 	selectedProjectTasks,
 	taskSelectionKey,
+	taskTreeKeys,
 };
 export type {
 	ProjectBoardTask,

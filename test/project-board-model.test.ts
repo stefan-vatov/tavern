@@ -1,11 +1,7 @@
 /* eslint-disable eslint/no-magic-numbers */
 import { Effect } from 'effect';
 import { buildProjectLibrary, projectTasks, taskSelectionKey } from '../src/project-library';
-import {
-	addTaskToFocusQueue,
-	createProjectBoardModel,
-	removeTaskFromFocusQueue,
-} from '../src/project-board-model';
+import { addTaskToFocusQueue, createProjectBoardModel } from '../src/project-board-model';
 
 const PROJECT_MARKDOWN = `---
 Title: Pi
@@ -59,12 +55,10 @@ describe('project board model', () => {
 		expect(model.focusTasks.map((task) => task.text)).toEqual(['Draft post']);
 	});
 
-	it('should add and remove task keys without duplicates', () => {
+	it('should add task keys without duplicates', () => {
 		expect(addTaskToFocusQueue(['a'], 'a')).toEqual(['a']);
 		expect(addTaskToFocusQueue(['a'], 'b')).toEqual(['a', 'b']);
 		expect(addTaskToFocusQueue(['a'], '')).toEqual(['a']);
-		expect(removeTaskFromFocusQueue(['a', 'b'], 'a')).toEqual(['b']);
-		expect(removeTaskFromFocusQueue(['a'], '')).toEqual(['a']);
 	});
 
 	it('should select the first project when selected path is unavailable', () => {

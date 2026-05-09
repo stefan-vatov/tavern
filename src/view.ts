@@ -1,15 +1,12 @@
 /* eslint-disable eslint/func-style, eslint/max-lines, eslint/max-statements, eslint/no-magic-numbers */
 import { Effect, Exit } from 'effect';
 import { ItemView, Menu, Notice, Scope, setIcon, type WorkspaceLeaf } from 'obsidian';
-import {
-	addTaskToFocusQueue,
-	createProjectBoardModel,
-	removeTaskFromFocusQueue,
-} from './project-board-model';
+import { addTaskToFocusQueue, createProjectBoardModel } from './project-board-model';
 import {
 	filterTasks,
 	projectTasks,
 	taskSelectionKey,
+	taskTreeKeys,
 	type ProjectBoardTask,
 	type ProjectLibrary,
 	type ProjectSummary,
@@ -1125,11 +1122,10 @@ class TavernView extends ItemView {
 			new Notice('Tavern could not delete the task.');
 			return;
 		}
-		const key = taskSelectionKey(task);
-		if (this.deps.settings.boardTaskKeys.includes(key)) {
-			this.deps.settings.boardTaskKeys = removeTaskFromFocusQueue(
-				this.deps.settings.boardTaskKeys,
-				key,
+		const keys = this.taskTreeSelectionKeys(task);
+		if (keys.some((key) => this.deps.settings.boardTaskKeys.includes(key))) {
+			this.deps.settings.boardTaskKeys = this.deps.settings.boardTaskKeys.filter(
+				(key) => !keys.includes(key),
 			);
 			await this.deps.saveSettings();
 		}
@@ -1292,43 +1288,48 @@ class TavernView extends ItemView {
 	}
 
 	private async toggleTaskSelection(task: ProjectBoardTask | undefined): Promise<void> {
-		const key = taskSelectionKey(task);
-		if (key.length === 0) {
+		const keys = this.taskTreeSelectionKeys(task);
+		if (keys.length === 0) {
 			return;
 		}
 
-		if (this.deps.settings.boardTaskKeys.includes(key)) {
-			this.deps.settings.boardTaskKeys = removeTaskFromFocusQueue(
-				this.deps.settings.boardTaskKeys,
-				key,
+		if (keys.some((key) => this.deps.settings.boardTaskKeys.includes(key))) {
+			this.deps.settings.boardTaskKeys = this.deps.settings.boardTaskKeys.filter(
+				(key) => !keys.includes(key),
 			);
 		} else {
-			this.deps.settings.boardTaskKeys = addTaskToFocusQueue(this.deps.settings.boardTaskKeys, key);
+			this.deps.settings.boardTaskKeys = keys.reduce(
+				(boardTaskKeys, key) => addTaskToFocusQueue(boardTaskKeys, key),
+				this.deps.settings.boardTaskKeys,
+			);
 		}
 		await this.deps.saveSettings();
 		this.renderShell();
 	}
 
 	private async addTaskSelection(task: ProjectBoardTask | undefined): Promise<void> {
-		const key = taskSelectionKey(task);
-		if (key.length === 0 || this.deps.settings.boardTaskKeys.includes(key)) {
+		const keys = this.taskTreeSelectionKeys(task);
+		const nextKeys = keys.filter((key) => !this.deps.settings.boardTaskKeys.includes(key));
+		if (nextKeys.length === 0) {
 			return;
 		}
 
-		this.deps.settings.boardTaskKeys = addTaskToFocusQueue(this.deps.settings.boardTaskKeys, key);
+		this.deps.settings.boardTaskKeys = nextKeys.reduce(
+			(boardTaskKeys, key) => addTaskToFocusQueue(boardTaskKeys, key),
+			this.deps.settings.boardTaskKeys,
+		);
 		await this.deps.saveSettings();
 		this.renderShell();
 	}
 
 	private async removeTaskSelection(task: ProjectBoardTask | undefined): Promise<void> {
-		const key = taskSelectionKey(task);
-		if (key.length === 0) {
+		const keys = this.taskTreeSelectionKeys(task);
+		if (keys.length === 0) {
 			return;
 		}
 
-		this.deps.settings.boardTaskKeys = removeTaskFromFocusQueue(
-			this.deps.settings.boardTaskKeys,
-			key,
+		this.deps.settings.boardTaskKeys = this.deps.settings.boardTaskKeys.filter(
+			(key) => !keys.includes(key),
 		);
 		await this.deps.saveSettings();
 		this.renderShell();
@@ -1339,20 +1340,36 @@ class TavernView extends ItemView {
 			return;
 		}
 
-		if (!this.deps.settings.boardTaskKeys.includes(sourceKey)) {
+		const sourceTask = this.taskFromSelectionKey(sourceKey);
+		const sourceKeys = this.taskTreeSelectionKeys(sourceTask).filter((key) =>
+			this.deps.settings.boardTaskKeys.includes(key),
+		);
+		if (sourceKeys.length === 0 || sourceKeys.includes(targetKey)) {
 			return;
 		}
 
-		const keys = this.deps.settings.boardTaskKeys.filter((key) => key !== sourceKey);
+		const keys = this.deps.settings.boardTaskKeys.filter((key) => !sourceKeys.includes(key));
 		const targetIndex = keys.indexOf(targetKey);
 		if (targetIndex < 0) {
 			return;
 		}
 
-		keys.splice(targetIndex, 0, sourceKey);
+		keys.splice(targetIndex, 0, ...sourceKeys);
 		this.deps.settings.boardTaskKeys = keys;
 		await this.deps.saveSettings();
 		this.renderShell();
+	}
+
+	private taskTreeSelectionKeys(task: ProjectBoardTask | undefined): string[] {
+		if (!task) {
+			return [];
+		}
+
+		return taskTreeKeys(projectTasks(this.library), task);
+	}
+
+	private taskFromSelectionKey(key: string): ProjectBoardTask | undefined {
+		return projectTasks(this.library).find((task) => taskSelectionKey(task) === key);
 	}
 
 	private taskFromDrop(event: DragEvent): ProjectBoardTask | undefined {
