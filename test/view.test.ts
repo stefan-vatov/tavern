@@ -367,6 +367,9 @@ const findByClass = (root: FakeElement, className: string): FakeElement | undefi
 const findByText = (root: FakeElement, text: string): FakeElement | undefined =>
 	allElements(root).find((element) => element.text === text);
 
+const findByHref = (root: FakeElement, href: string): FakeElement | undefined =>
+	allElements(root).find((element) => element.attr.href === href);
+
 const findAllByAriaLabel = (root: FakeElement, label: string): FakeElement[] =>
 	allElements(root).filter((element) => element.attr['aria-label'] === label);
 
@@ -1337,6 +1340,43 @@ tavern: project
 		expect(stopDrag).toHaveBeenCalledTimes(1);
 		expect(files['04_Projects/Pi.md']).toContain('- [ ] Build inline editor');
 		expect(files['04_Projects/Pi.md']).not.toContain('- [ ] Build board');
+	});
+
+	it('should render markdown links in task text as clickable links', async () => {
+		const files = {
+			'04_Projects/Pi.md': PROJECT_MARKDOWN.replace(
+				'- [ ] Build board',
+				'- [ ] Adopt [opensrc \\| Source Code for AI Coding Agents](https://opensrc.sh) into toolchain',
+			),
+		};
+		const vault = createVault(files);
+		const view = new TavernView({} as never, {
+			saveSettings: vi.fn(),
+			settings: {
+				boardTaskKeys: [],
+				projectFolders: ['04_Projects'],
+				tavernName: 'Tavern',
+			},
+			vault,
+		});
+
+		await view.setState({ mode: 'note', selectedPath: '04_Projects/Pi.md' }, { history: false });
+		const root = rootElements.at(-1) as FakeElement;
+		const link = findByHref(root, 'https://opensrc.sh');
+		if (!link) {
+			throw new Error('markdown task link was not rendered');
+		}
+		const stopPropagation = vi.fn();
+
+		link.dispatch('click', { stopPropagation });
+
+		expect(link.tagName).toBe('A');
+		expect(link.text).toBe('opensrc | Source Code for AI Coding Agents');
+		expect(link.attr.target).toBe('_blank');
+		expect(textValues(root)).not.toContain(
+			'[opensrc \\| Source Code for AI Coding Agents](https://opensrc.sh)',
+		);
+		expect(stopPropagation).toHaveBeenCalledTimes(1);
 	});
 
 	it('should edit global queue task text in its source project', async () => {

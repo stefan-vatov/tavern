@@ -937,14 +937,15 @@ class TavernView extends ItemView {
 		task: ProjectBoardTask | undefined,
 		text: string,
 	): void {
+		const labelText = text || 'Untitled task';
 		const label = containerEl.createEl('span', {
 			attr: {
-				'aria-label': `Edit ${text || 'Untitled task'}`,
+				'aria-label': `Edit ${labelText}`,
 				tabindex: '0',
 			},
 			cls: 'tavern-project-task-text tavern-editable-task-text',
-			text: text || 'Untitled task',
 		});
+		this.renderInlineTaskMarkdown(label, labelText);
 
 		const openEditor = (event?: Event) => {
 			event?.preventDefault();
@@ -958,6 +959,33 @@ class TavernView extends ItemView {
 				openEditor(event);
 			}
 		});
+	}
+
+	private renderInlineTaskMarkdown(containerEl: HTMLElement, text: string): void {
+		const segments = inlineMarkdownLinkSegments(text);
+		if (segments.length === 0) {
+			containerEl.createSpan({ text });
+			return;
+		}
+
+		for (const segment of segments) {
+			if (segment.type === 'text') {
+				containerEl.createSpan({ text: unescapeInlineMarkdownText(segment.text) });
+			} else {
+				const link = containerEl.createEl('a', {
+					attr: {
+						href: segment.href,
+						rel: 'noopener noreferrer',
+						target: '_blank',
+					},
+					cls: 'tavern-task-link',
+					text: unescapeInlineMarkdownText(segment.text),
+				});
+				link.addEventListener('click', (event) => event.stopPropagation());
+				link.addEventListener('dblclick', (event) => event.stopPropagation());
+				link.addEventListener('dragstart', (event) => event.stopPropagation());
+			}
+		}
 	}
 
 	private renderTaskTextEditor(
@@ -1439,6 +1467,49 @@ const sidebarProjectSections = (projects: ProjectSummary[]): SidebarProjectSecti
 	return [...sections.entries()]
 		.sort(([left], [right]) => left.localeCompare(right))
 		.map(([title, sectionProjects]) => ({ projects: sectionProjects, title }));
+};
+
+type InlineMarkdownSegment =
+	| {
+			text: string;
+			type: 'text';
+	  }
+	| {
+			href: string;
+			text: string;
+			type: 'link';
+	  };
+
+const MARKDOWN_LINK_PATTERN = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+const INLINE_MARKDOWN_ESCAPE_PATTERN = /\\([\\`*_[\]{}()#+\-.!|>])/g;
+
+const unescapeInlineMarkdownText = (text: string): string =>
+	text.replace(INLINE_MARKDOWN_ESCAPE_PATTERN, '$1');
+
+const inlineMarkdownLinkSegments = (text: string): InlineMarkdownSegment[] => {
+	const segments: InlineMarkdownSegment[] = [];
+	let cursor = 0;
+
+	for (const match of text.matchAll(MARKDOWN_LINK_PATTERN)) {
+		const [raw, label, href] = match;
+		if (label && href) {
+			const index = match.index ?? 0;
+			if (index > cursor) {
+				segments.push({ text: text.slice(cursor, index), type: 'text' });
+			}
+			segments.push({ href, text: label, type: 'link' });
+			cursor = index + raw.length;
+		}
+	}
+
+	if (segments.length === 0) {
+		return [];
+	}
+	if (cursor < text.length) {
+		segments.push({ text: text.slice(cursor), type: 'text' });
+	}
+
+	return segments;
 };
 
 export { TAVERN_VIEW_TYPE, TavernView };

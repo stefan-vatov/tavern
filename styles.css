@@ -2571,6 +2571,17 @@
 	background: color-mix(in srgb, var(--background-modifier-hover) 65%, transparent);
 }
 
+.tavern-task-link {
+	color: var(--text-accent);
+	text-decoration: none;
+	text-underline-offset: 2px;
+}
+
+.tavern-task-link:hover {
+	color: var(--text-accent-hover);
+	text-decoration: underline;
+}
+
 .tavern-editable-task-text.is-editing {
 	background: transparent;
 }
