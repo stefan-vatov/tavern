@@ -1,3 +1,10 @@
+## [1.0.4](https://github.com/stefan-vatov/tavern/compare/1.0.3...1.0.4) (2026-05-09)
+
+
+### Bug Fixes
+
+* preserve focus queue task trees ([4d076ad](https://github.com/stefan-vatov/tavern/commit/4d076adebe2dccfd012933c29cc4416f17977415))
+
 ## [1.0.3](https://github.com/stefan-vatov/tavern/compare/1.0.2...1.0.3) (2026-05-09)
 
 ### Bug Fixes
