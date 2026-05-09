@@ -1562,13 +1562,16 @@ tavern: project
 	});
 
 	it('should collapse and expand the available task list', async () => {
+		const saveSettings = vi.fn();
+		const settings = {
+			availableTasksCollapsed: false,
+			boardTaskKeys: [],
+			projectFolders: ['04_Projects'],
+			tavernName: 'Tavern',
+		};
 		const view = new TavernView({} as never, {
-			saveSettings: vi.fn(),
-			settings: {
-				boardTaskKeys: [],
-				projectFolders: ['04_Projects'],
-				tavernName: 'Tavern',
-			},
+			saveSettings,
+			settings,
 			vault: createVault({
 				'04_Projects/Pi.md': PROJECT_MARKDOWN,
 			}),
@@ -1586,6 +1589,8 @@ tavern: project
 		toggleButton.dispatch('click');
 
 		expect(textValues(root)).not.toContain('Build board');
+		expect(settings.availableTasksCollapsed).toBe(true);
+		expect(saveSettings).toHaveBeenCalledTimes(1);
 		expect(view.getState()).toEqual(
 			expect.objectContaining({
 				availableTasksCollapsed: true,
@@ -1596,6 +1601,30 @@ tavern: project
 		nextToggleButton?.dispatch('click');
 
 		expect(textValues(root)).toContain('Build board');
+		expect(settings.availableTasksCollapsed).toBe(false);
+		expect(saveSettings).toHaveBeenCalledTimes(2);
+	});
+
+	it('should restore available task collapse state from saved settings', async () => {
+		const view = new TavernView({} as never, {
+			saveSettings: vi.fn(),
+			settings: {
+				availableTasksCollapsed: true,
+				boardTaskKeys: [],
+				projectFolders: ['04_Projects'],
+				tavernName: 'Tavern',
+			},
+			vault: createVault({
+				'04_Projects/Pi.md': PROJECT_MARKDOWN,
+			}),
+		});
+
+		await view.onOpen();
+
+		const root = rootElements.at(-1) as FakeElement;
+		const availableSection = findByText(root, 'Available tasks')?.parent?.parent?.parent;
+		expect(availableSection?.classes.has('is-collapsed')).toBe(true);
+		expect(textValues(root)).not.toContain('Build board');
 	});
 
 	it('should complete a task and persist it back to the project note', async () => {

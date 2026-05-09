@@ -13,6 +13,10 @@ describe('default settings', () => {
 		expect(DEFAULT_SETTINGS.boardTaskKeys).toEqual([]);
 	});
 
+	it('starts with available tasks expanded', () => {
+		expect(DEFAULT_SETTINGS.availableTasksCollapsed).toBe(false);
+	});
+
 	it('starts with no collapsed sidebar sections', () => {
 		expect(DEFAULT_SETTINGS.sidebarCollapsedSections).toEqual([]);
 	});

@@ -76,7 +76,7 @@ class TavernView extends ItemView {
 	private errorMessage: string | null = null;
 	private library: ProjectLibrary = EMPTY_LIBRARY;
 	private loading = true;
-	private availableTasksCollapsed = false;
+	private availableTasksCollapsed: boolean;
 	private boardPage: TavernBoardPage = 'global';
 	private globalTaskQuery = '';
 	private mode: TavernViewMode = 'board';
@@ -93,6 +93,7 @@ class TavernView extends ItemView {
 		private readonly deps: TavernViewDeps,
 	) {
 		super(leaf);
+		this.availableTasksCollapsed = deps.settings.availableTasksCollapsed ?? false;
 		this.sidebarCollapsedSections = new Set(deps.settings.sidebarCollapsedSections ?? []);
 	}
 
@@ -151,6 +152,7 @@ class TavernView extends ItemView {
 		}
 		if (typeof state.availableTasksCollapsed === 'boolean') {
 			this.availableTasksCollapsed = state.availableTasksCollapsed;
+			this.deps.settings.availableTasksCollapsed = state.availableTasksCollapsed;
 		}
 		if (Array.isArray(state.sidebarCollapsedSections)) {
 			this.sidebarCollapsedSections = new Set(
@@ -602,6 +604,8 @@ class TavernView extends ItemView {
 		setIcon(collapseButton, collapseIcon);
 		collapseButton.addEventListener('click', () => {
 			this.availableTasksCollapsed = !this.availableTasksCollapsed;
+			this.deps.settings.availableTasksCollapsed = this.availableTasksCollapsed;
+			void this.deps.saveSettings();
 			this.renderShell();
 		});
 		titleWrap.createDiv({ cls: 'tavern-project-section-title', text: 'Available tasks' });

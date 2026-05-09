@@ -1,4 +1,5 @@
 interface TavernSettings {
+	availableTasksCollapsed?: boolean;
 	boardTaskKeys: string[];
 	projectFolders: string[];
 	sidebarCollapsedSections?: string[];
@@ -6,6 +7,7 @@ interface TavernSettings {
 }
 
 const DEFAULT_SETTINGS: TavernSettings = {
+	availableTasksCollapsed: false,
 	boardTaskKeys: [],
 	projectFolders: ['04_Projects'],
 	sidebarCollapsedSections: [],

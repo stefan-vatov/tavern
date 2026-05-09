@@ -177,6 +177,7 @@ describe('main plugin activation', () => {
 		await plugin.saveSettings();
 
 		expect(plugin.settings).toEqual({
+			availableTasksCollapsed: false,
 			boardTaskKeys: [],
 			projectFolders: ['Projects'],
 			sidebarCollapsedSections: [],
