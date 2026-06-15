@@ -1,3 +1,10 @@
+## [1.0.5](https://github.com/stefan-vatov/tavern/compare/1.0.4...1.0.5) (2026-06-15)
+
+
+### Bug Fixes
+
+* resolve task ID collision bug in createTaskId (sectionIdx prefix for uniqueness); TDD regression test + comments ([3968c12](https://github.com/stefan-vatov/tavern/commit/3968c125b717123f560d7bcfef794e0383b02dfe))
+
 ## [1.0.4](https://github.com/stefan-vatov/tavern/compare/1.0.3...1.0.4) (2026-05-09)
 
 ### Bug Fixes
