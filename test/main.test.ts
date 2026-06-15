@@ -8,6 +8,8 @@ const { noticeMock } = vi.hoisted(() => ({
 }));
 const ACTIVATION_COUNT_WITH_SEARCH_COMMAND = 4;
 const ONE_SEARCH_OPEN = 1;
+const ONE_CALL = 1;
+const TWO_CALLS = 2;
 
 vi.mock('obsidian', () => ({
 	App: class {},
@@ -60,6 +62,7 @@ describe('main plugin activation', () => {
 		plugin.app = {
 			metadataCache: {
 				getFileCache: vi.fn(() => ({ frontmatter: { tavern: 'project' } })),
+				on: vi.fn(() => ({ event: 'metadata-changed' })), // L3: support the external fm 'changed' listener added in onload
 			},
 			vault: {},
 			workspace: {
@@ -117,6 +120,7 @@ describe('main plugin activation', () => {
 		plugin.app = {
 			metadataCache: {
 				getFileCache: vi.fn(),
+				on: vi.fn(() => ({ event: 'metadata-changed' })), // L3: support the external fm 'changed' listener added in onload
 			},
 			vault: {},
 			workspace: {
@@ -147,6 +151,7 @@ describe('main plugin activation', () => {
 		plugin.app = {
 			metadataCache: {
 				getFileCache: vi.fn(() => ({ frontmatter: { tavern: 'note' } })),
+				on: vi.fn(() => ({ event: 'metadata-changed' })), // L3: support the external fm 'changed' listener added in onload
 			},
 			vault: {},
 			workspace: {
@@ -316,6 +321,7 @@ describe('main plugin activation', () => {
 			},
 			metadataCache: {
 				getFileCache: vi.fn(),
+				on: vi.fn(() => ({ event: 'metadata-changed' })), // L3: support the external fm 'changed' listener
 			},
 			vault: {},
 			workspace: {
@@ -358,6 +364,7 @@ describe('main plugin activation', () => {
 			},
 			metadataCache: {
 				getFileCache: vi.fn(),
+				on: vi.fn(() => ({ event: 'metadata-changed' })), // L3: support the external fm 'changed' listener
 			},
 			vault: {},
 			workspace: {
@@ -372,5 +379,62 @@ describe('main plugin activation', () => {
 
 		expect(plugin.app.fileManager.processFrontMatter).not.toHaveBeenCalled();
 		expect(noticeMock).toHaveBeenCalledWith('Tavern needs an active note to mark as a project.');
+	});
+
+	// TDD coverage for L3 metadata 'changed' listener + _refreshOpenTavernIfNeeded helper (exercises if(file), getLeaves check, early return on 0 leaves, forEach call to refresh)
+	it('should refresh open tavern views on metadata changed when taverns are open (L3), and short-circuit when none (covers 48-49,167-174)', async () => {
+		const plugin = createPlugin();
+		const refreshMock = vi.fn();
+		const leafWithRefresh = { view: { refreshProjects: refreshMock } };
+		let changedCallback: ((file: unknown) => void) | undefined;
+		plugin.loadData = vi.fn(async () => ({}));
+		plugin.registerView = vi.fn();
+		plugin.addRibbonIcon = vi.fn();
+		plugin.addStatusBarItem = vi.fn(() => ({ setText: vi.fn() }) as unknown as HTMLElement);
+		plugin.registerEvent = vi.fn();
+		plugin.addCommand = vi.fn();
+		plugin.addSettingTab = vi.fn();
+		const getLeaves = vi.fn((type: string) => {
+			if (type === TAVERN_VIEW_TYPE) {
+				return [leafWithRefresh];
+			}
+			return [];
+		});
+		plugin.app = {
+			metadataCache: {
+				getFileCache: vi.fn(),
+				on: vi.fn((eventName: string, cb: (file: unknown) => void) => {
+					if (eventName === 'changed') {
+						changedCallback = cb;
+					}
+					return { event: 'metadata-changed' };
+				}),
+			},
+			vault: {},
+			workspace: {
+				getLeavesOfType: getLeaves,
+				on: vi.fn(),
+			},
+		} as never;
+
+		await plugin.onload();
+
+		// positive: file truthy + leaves >0 => calls refresh via helper
+		changedCallback?.({ path: '04_Projects/Pi.md' });
+		await vi.waitFor(() => expect(refreshMock).toHaveBeenCalledTimes(ONE_CALL));
+
+		// forEach if(view && typeof fn): include a leaf without view/fn to hit falsy branch too
+		getLeaves.mockReturnValue([{ view: null }, { view: {} }, leafWithRefresh] as any);
+		changedCallback?.({ path: '04_Projects/Pi2.md' });
+		await vi.waitFor(() => expect(refreshMock).toHaveBeenCalledTimes(TWO_CALLS));
+
+		// early return when no leaves
+		getLeaves.mockReturnValue([]);
+		changedCallback?.({ path: '04_Projects/Other.md' });
+		expect(refreshMock).toHaveBeenCalledTimes(TWO_CALLS); // no extra
+
+		// if(!file) guard
+		changedCallback?.(null);
+		expect(refreshMock).toHaveBeenCalledTimes(TWO_CALLS);
 	});
 });

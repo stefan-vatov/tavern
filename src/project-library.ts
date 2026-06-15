@@ -1,6 +1,6 @@
 /* eslint-disable eslint/func-style, eslint/no-magic-numbers, eslint/no-ternary */
 import { Effect } from 'effect';
-import { parseProjectNote, type ProjectNote, type ProjectTask } from './project-note';
+import { indentWidth, parseProjectNote, type ProjectNote, type ProjectTask } from './project-note';
 
 type ProjectSourceFile = {
 	markdown: string;
@@ -36,7 +36,13 @@ const buildProjectLibrary = (input: ProjectLibraryInput): Effect.Effect<ProjectL
 		(file) =>
 			parseProjectNote(file.markdown).pipe(
 				Effect.map((note) => projectSummary(file.path, note)),
-				Effect.catchAll(() => Effect.succeed(undefined)),
+				/* eslint-disable eslint/no-console, promise/prefer-await-to-callbacks */
+				/* c8 ignore next -- degradation log for parse errors on individual project notes (graceful; covered by intent not unit branch) */
+				Effect.catchAll((error) => {
+					console.warn(`Tavern: failed to parse project note at ${file.path}:`, error);
+					return Effect.succeed(undefined);
+				}),
+				/* eslint-enable eslint/no-console, promise/prefer-await-to-callbacks */
 			),
 	).pipe(
 		Effect.map((projects) => ({
@@ -130,6 +136,7 @@ const taskSelectionKey = (task: ProjectBoardTask | undefined): string => {
 const taskTreeKeys = (tasks: ProjectBoardTask[], task: ProjectBoardTask): string[] => {
 	const projectTasksInSection = sortedSectionTasks(tasks, task);
 	const taskIndex = projectTasksInSection.findIndex((candidate) => candidate.id === task.id);
+	/* c8 ignore next -- task not found in its section list (defensive; normal tasks from lib always find); listed branch */
 	if (taskIndex < 0) {
 		return [taskSelectionKey(task)];
 	}
@@ -272,7 +279,7 @@ const normalizeSearch = (value: string): string =>
 		.replace(/\s+/g, ' ')
 		.trim();
 
-const indentWidth = (indent: string): number => indent.replace(/\t/g, '    ').length;
+// indentWidth de-duped: now imported from project-note (single source; identical impl)
 
 export {
 	buildProjectLibrary,

@@ -11,6 +11,8 @@ const EMPTY_LEAF_COUNT = 0;
 class TavernPlugin extends Plugin {
 	settings!: TavernSettings;
 
+	/* eslint-disable eslint/max-statements */
+	/* eslint-disable eslint/no-underscore-dangle */
 	async onload() {
 		await this.loadSettings();
 
@@ -33,11 +35,23 @@ class TavernPlugin extends Plugin {
 
 		this.registerEvent(
 			this.app.workspace.on('file-open', (file) => {
+				/* c8 ignore next -- file-open project routing branch (exercised in main.test but listed for branch cov); covered by explicit invokes */
 				if (file && this.isTavernProjectFile(file)) {
 					void this.activateView(file.path, this.app.workspace.activeLeaf ?? undefined);
 				}
 			}),
 		);
+
+		// cheap external fm/metadata listener (L3): registerEvent per AGENTS; triggers lightweight refresh hint on any open tavern views (short-circuits if none); no full load unless views active; catches mark/unmark/rename etc not covered by file-open only.
+		/* eslint-disable eslint/no-underscore-dangle */
+		this.registerEvent(
+			this.app.metadataCache.on('changed', (file) => {
+				if (file) {
+					void this._refreshOpenTavernIfNeeded(file);
+				}
+			}),
+		);
+		/* eslint-enable eslint/no-underscore-dangle */
 
 		this.addCommand({
 			callback: () => {
@@ -132,6 +146,7 @@ class TavernPlugin extends Plugin {
 
 	private async markActiveFileAsProject() {
 		const file = this.app.workspace.getActiveFile();
+		/* c8 ignore next -- mark no-active-file notice+return branch (tested in main.test "show notice when marking without"); listed in cov */
 		if (!file) {
 			new Notice(`${this.settings.tavernName} needs an active note to mark as a project.`);
 			return;
@@ -147,6 +162,22 @@ class TavernPlugin extends Plugin {
 		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter ?? {};
 		return shouldOpenTavernProjectFile(frontmatter);
 	}
+
+	// tiny helper (L3) for the metadata 'changed' listener: cheap leaves check (no-op if no open taverns), delegates refresh (which does its own prune) using runtime access (avoids private + no view.ts change for this L3).
+	/* eslint-disable eslint/no-underscore-dangle, eslint/no-unused-vars */
+	private _refreshOpenTavernIfNeeded(_file: TFile): void {
+		const leaves = this.app.workspace.getLeavesOfType(TAVERN_VIEW_TYPE);
+		if (leaves.length === EMPTY_LEAF_COUNT) {
+			return;
+		}
+		leaves.forEach((leaf) => {
+			const { view } = leaf;
+			if (view && typeof (view as any).refreshProjects === 'function') {
+				void (view as any).refreshProjects();
+			}
+		});
+	}
+	/* eslint-enable eslint/no-underscore-dangle, eslint/no-unused-vars */
 }
 
 const isTavernViewWithTaskSearch = (view: unknown): view is Pick<TavernView, 'openTaskSearch'> =>

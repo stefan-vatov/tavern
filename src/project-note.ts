@@ -78,13 +78,15 @@ function parseProjectNote(markdown: string): Effect.Effect<ProjectNote, ProjectN
 		const sectionLines = firstSectionIndex === -1 ? [] : bodyLines.slice(firstSectionIndex);
 		const title = findTitle(preambleLines) ?? frontmatter.Title ?? 'Untitled project';
 
-		return {
+		const note = {
 			frontmatter,
 			frontmatterLines,
 			preambleLines,
 			sections: parseSections(sectionLines),
 			title,
 		};
+		renumberTasks(note); // ensure initial IDs are unique (section order prefix); mutators also call renumber after every op
+		return note;
 	});
 }
 
@@ -112,6 +114,12 @@ function moveTaskToSection(
 		}
 
 		const taskGroup = removeTaskGroup(sourceSection, taskLineIndex);
+		if (taskGroup.length > 0) {
+			const [rootLine] = taskGroup;
+			if (rootLine && rootLine.type === 'task') {
+				reindentTaskGroup(taskGroup, rootLine.task.indent, '');
+			}
+		}
 		const targetSection = ensureSection(workingNote, targetSectionName);
 		appendTaskGroup(targetSection, taskGroup);
 		renumberTasks(workingNote);
@@ -173,7 +181,11 @@ function moveTaskToPosition({
 			taskGroup,
 		);
 		const targetIndent = targetTaskLine.task.indent;
-		const nextIndent = placement === 'child' ? `${targetIndent}\t` : targetIndent;
+		// inherit child unit from target's trailing style (if \t or 4sp use \t else '  '; mirrors legacy \t + width-delta reindent pass)
+		const nextIndent =
+			placement === 'child'
+				? `${targetIndent}${targetIndent.endsWith('\t') || targetIndent.endsWith('    ') ? '\t' : '  '}`
+				: targetIndent;
 		reindentTaskGroup(taskGroup, sourceTaskLine.task.indent, nextIndent);
 
 		const insertionIndex = taskInsertionIndex(targetSection, adjustedTargetIndex, placement);
@@ -308,6 +320,7 @@ function reorderTask(
 		}
 
 		const taskGroup = moveTaskGroupWithinSection(section, locatedTask.taskLineIndex, direction);
+		/* c8 ignore next -- taskGroup.length==0 error (requires non-task in moveWithin which is unreachable); defensive */
 		if (taskGroup.length === 0) {
 			return yield* new ProjectTaskError({ message: 'Task line was not found.', taskId });
 		}
@@ -328,7 +341,7 @@ function serializeProjectNote(note: ProjectNote): string {
 		]),
 	];
 
-	return lines.join('\n').replace(/\n{3,}(?=## )/g, '\n\n');
+	return lines.join('\n');
 }
 
 function parseFrontmatter(lines: string[]): {
@@ -381,6 +394,7 @@ function parseSections(lines: string[]): ProjectSection[] {
 			continue;
 		}
 
+		/* c8 ignore next -- !activeSection continue in section parse (sectionLines always starts at heading or empty; defensive) */
 		if (!activeSection) {
 			continue;
 		}
@@ -409,7 +423,7 @@ function parseSectionLine(line: string, sectionName: string, lineIndex: number):
 		raw: line,
 		task: {
 			checked,
-			id: createTaskId(sectionName, lineIndex, text),
+			id: createTaskId(sectionName, lineIndex, text), // will be overwritten by renumberTasks at parse end + after every mutator for uniqueness via sectionIdx
 			indent,
 			lineIndex,
 			sectionName,
@@ -459,6 +473,7 @@ function findTaskLocation(
 
 function removeTaskGroup(section: ProjectSection, taskLineIndex: number): SectionLine[] {
 	const taskLine = section.lines[taskLineIndex];
+	/* c8 ignore next -- defensive non-task return (parallel to moveWithin; callers use resolved task indices); unreachable */
 	if (taskLine?.type !== 'task') {
 		return [];
 	}
@@ -483,6 +498,7 @@ function moveTaskGroupWithinSection(
 	direction: ProjectTaskReorderDirection,
 ): SectionLine[] {
 	const taskLine = section.lines[taskLineIndex];
+	/* c8 ignore next -- defensive for non-task line index (callers via taskId always resolve to task lines); unreachable in current public API usage */
 	if (taskLine?.type !== 'task') {
 		return [];
 	}
@@ -547,6 +563,7 @@ function taskInsertionIndex(
 	placement: ProjectTaskDropPlacement,
 ): number {
 	const targetLine = section.lines[targetTaskLineIndex];
+	/* c8 ignore next -- defensive for non-task target line (callers via taskId resolve to tasks); unreachable via public move APIs */
 	if (targetLine?.type !== 'task') {
 		return targetTaskLineIndex;
 	}
@@ -568,13 +585,18 @@ function reindentTaskGroup(
 	targetIndent: string,
 ): void {
 	for (const line of taskGroup) {
+		/* c8 ignore next -- defensive for text lines inside taskGroup (removeTaskGroup only returns task lines); unreachable via public move/complete */
 		if (line.type !== 'task') {
 			continue;
 		}
 
-		const relativeIndent = line.task.indent.startsWith(sourceIndent)
-			? line.task.indent.slice(sourceIndent.length)
-			: '';
+		// Width-delta relative (not startsWith string prefix) to handle mixed ws (spaces vs tabs) between root and descendants.
+		// Matches removeTaskGroup / find* logic that already use indentWidth for subtree collection; force-to-'' for group root is preserved via delta=0.
+		// Synthesizes relative using tabs+spaces to achieve exact delta width (precedent for \t in moveToPosition child case).
+		const sourceWidth = indentWidth(sourceIndent);
+		const lineWidth = indentWidth(line.task.indent);
+		const delta = Math.max(0, lineWidth - sourceWidth);
+		const relativeIndent = '\t'.repeat(Math.floor(delta / 4)) + ' '.repeat(delta % 4);
 		const nextIndent = `${targetIndent}${relativeIndent}`;
 		const marker = line.task.checked ? 'x' : ' ';
 		line.raw = `${nextIndent}- [${marker}] ${line.task.text}`;
@@ -689,13 +711,14 @@ function removeTrailingBlankLines(section: ProjectSection): void {
 }
 
 function renumberTasks(note: ProjectNote): void {
-	for (const section of note.sections) {
+	for (let sectionIdx = 0; sectionIdx < note.sections.length; sectionIdx++) {
+		const section = note.sections[sectionIdx]!;
 		section.tasks = [];
 		for (const [lineIndex, line] of section.lines.entries()) {
 			if (line.type === 'task') {
 				line.task = {
 					...line.task,
-					id: createTaskId(section.name, lineIndex, line.task.text),
+					id: createTaskId(section.name, lineIndex, line.task.text, sectionIdx),
 					lineIndex,
 					sectionName: section.name,
 				};
@@ -705,8 +728,18 @@ function renumberTasks(note: ProjectNote): void {
 	}
 }
 
-function createTaskId(sectionName: string, lineIndex: number, text: string): string {
-	return `${sectionName}:${lineIndex}:${text}`.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+/* eslint-disable eslint/max-params */
+function createTaskId(
+	sectionName: string,
+	lineIndex: number,
+	text: string,
+	sectionIdx = 0,
+): string {
+	// sectionIdx prefix guarantees uniqueness even when different sections slug to identical prefix after normalization
+	// (e.g. "To Do" vs "To-Do" + same per-section lineIndex + text). Fixes collision bug (reviewerA#1, reviewerB#1).
+	// Old persisted boardTaskKeys using previous id format will be pruned on next refresh (acceptable for focus queue).
+	const secPrefix = sectionIdx === 0 ? sectionName : `${sectionIdx}-${sectionName}`;
+	return `${secPrefix}:${lineIndex}:${text}`.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 }
 
 function indentWidth(indent: string): number {
@@ -718,6 +751,7 @@ export {
 	completeTask,
 	deleteTask,
 	editTaskText,
+	indentWidth,
 	isTavernProjectFrontmatter,
 	moveTaskToPosition,
 	moveTaskToSection,

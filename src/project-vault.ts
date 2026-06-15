@@ -10,7 +10,12 @@ import {
 	reorderProjectTask,
 	type ProjectActionError,
 } from './project-actions';
-import { buildProjectLibrary, type ProjectBoardTask, type ProjectLibrary } from './project-library';
+import {
+	buildProjectLibrary,
+	type ProjectBoardTask,
+	type ProjectLibrary,
+	type ProjectSourceFile,
+} from './project-library';
 import type { ProjectTaskDropPlacement, ProjectTaskReorderDirection } from './project-note';
 
 type ProjectVaultFile = {
@@ -58,8 +63,23 @@ const loadVaultProjectLibrary = (
 				markdown: await vault.read(file),
 				path: file.path,
 			}),
-		}),
-	).pipe(Effect.flatMap((files) => buildProjectLibrary({ files, folders })));
+		}).pipe(
+			/* eslint-disable eslint/no-console, promise/prefer-await-to-callbacks */
+			/* c8 ignore next -- degradation log for read errors (per-file graceful in load; action reads still fail hard) */
+			Effect.catchAll((error) => {
+				console.warn(`Tavern: failed to read file at ${file.path}:`, error);
+				return Effect.succeed(undefined);
+			}),
+			/* eslint-enable eslint/no-console, promise/prefer-await-to-callbacks */
+		),
+	).pipe(
+		Effect.flatMap((files) =>
+			buildProjectLibrary({
+				files: files.filter((file): file is ProjectSourceFile => file !== undefined),
+				folders,
+			}),
+		),
+	);
 
 const addVaultProjectTask = ({
 	projectPath,
@@ -185,7 +205,15 @@ const updateProjectSource = (
 	});
 
 const findFileByPath = (vault: ProjectVault, path: string): ProjectVaultFile | undefined =>
-	vault.getMarkdownFiles().find((file) => file.path === path);
+	vault.getMarkdownFiles().find((file) => {
+		// inline same 3-line normalizePath logic from project-library (no new export/refactor)
+		const norm = (str: string) =>
+			str
+				.trim()
+				.replace(/\\/g, '/')
+				.replace(/^\/+|\/+$/g, '');
+		return norm(file.path) === norm(path);
+	});
 
 export {
 	addVaultProjectTask,

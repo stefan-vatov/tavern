@@ -289,12 +289,10 @@ describe('project vault adapter', () => {
 			},
 		};
 
-		const error = await Effect.runPromise(
-			Effect.flip(loadVaultProjectLibrary(vault, ['04_Projects'])),
-		);
-
-		expect(error.message).toBe('Unable to read project file.');
-		expect(error.path).toBe('04_Projects/Pi.md');
+		// Graceful degradation for reads (fix for whole-board poisoning on any md read error): load now succeeds with empty projects instead of flipping a read error.
+		// (Action-level reads in updateProjectSource still fail as before for task ops on unreadable files.)
+		const library = await Effect.runPromise(loadVaultProjectLibrary(vault, ['04_Projects']));
+		expect(library.projects).toEqual([]);
 	});
 
 	it('should fail when writing a project file fails', async () => {
@@ -315,5 +313,21 @@ describe('project vault adapter', () => {
 			throw new Error('expected vault error');
 		}
 		expect(error.path).toBe('04_Projects/Pi.md');
+	});
+
+	// TDD confirmation for p5 vault path lookup residual (normalize to handle trailing /, \, etc vs stored projectPath)
+	// Regression test for Pass 5 fixed issue C1 (vault path lookup now normalizes like library to handle trailing /, \, etc vs stored projectPath from previous load): prevents regression of "file not found" on external rename/move or normalization variance during actions.
+	it('should succeed for actions even if the projectPath has different normalization (e.g. trailing slash) than the current vault file list', async () => {
+		const vault: ProjectVault = {
+			getMarkdownFiles: () => [{ path: '04_Projects/Pi.md/' }], // trailing / (common variance)
+			modify: vi.fn(async () => {}), // spy + returns promise so tryPromise succeeds and .toHaveBeenCalled works
+			read: async () => PROJECT_MARKDOWN,
+		};
+		const library = await Effect.runPromise(loadVaultProjectLibrary(vault, ['04_Projects']));
+		const task = projectTasks(library).find((item) => item.text === 'Wire vault')!;
+		// simulate task/projectPath from previous load with clean path (without trailing)
+		const taskWithCleanPath = { ...task, projectPath: '04_Projects/Pi.md' };
+		await Effect.runPromise(completeVaultProjectTask(vault, taskWithCleanPath));
+		expect(vault.modify).toHaveBeenCalled();
 	});
 });
