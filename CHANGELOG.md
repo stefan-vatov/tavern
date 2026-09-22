@@ -1,9 +1,8 @@
 # [1.1.0](https://github.com/stefan-vatov/tavern/compare/1.0.5...1.1.0) (2026-09-22)
 
-
 ### Features
 
-* open tavern in one reusable app window ([4e7c52a](https://github.com/stefan-vatov/tavern/commit/4e7c52a7cb222052d90a44af8f82f42fb66d8695))
+- open tavern in one reusable app window ([4e7c52a](https://github.com/stefan-vatov/tavern/commit/4e7c52a7cb222052d90a44af8f82f42fb66d8695))
 
 ## [1.0.5](https://github.com/stefan-vatov/tavern/compare/1.0.4...1.0.5) (2026-06-15)
 

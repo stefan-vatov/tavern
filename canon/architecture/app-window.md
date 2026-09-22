@@ -50,3 +50,19 @@ migration, or close. Plugin unload cancels pending opens and detaches Tavern vie
 
 Project and task persistence remains owned by the persistence page; window and
 navigation state does not replace the independent Markdown content.
+
+## Local desktop validation
+
+Validation of this contract exercises the real loaded plugin in Obsidian. It
+checks repeated opening, project navigation, view replacement by a Markdown
+note, and plugin reload while another tab remains in the app window. The
+reuse checks compare the actual window identity before and after; counting
+Tavern views alone cannot establish that an old app window was reused.
+
+An actually closed app window permits one replacement window. The Obsidian host
+and unrelated note windows are distinct from the Tavern app. Closing a leftover
+window by hand does not validate reuse. Test reports distinguish observed UI
+interactions and saved Markdown changes from unit-test or API-only evidence.
+
+The operational setup and cleanup recipe lives in the
+[local-testing guide](../../docs/local-testing.md).

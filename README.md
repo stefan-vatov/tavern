@@ -47,6 +47,8 @@ Tavern settings with a comma-separated list.
 
 ## Development
 
+For isolated desktop UI testing, follow [How to test Tavern locally in Obsidian](docs/local-testing.md).
+
 From this directory:
 
 ```bash

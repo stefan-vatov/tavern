@@ -20,6 +20,14 @@ pnpm run check
 
 Use `pnpm run dev` while Obsidian has `../test-vault` open. Reload Obsidian after changes to `manifest.json`; normal TypeScript changes rebuild to `main.js`.
 
+## Local UI Testing
+
+When asked for local testing, computer use testing, or testing Tavern in Obsidian,
+read [the local-testing guide](docs/local-testing.md) before launching anything.
+Follow its session reuse, fixture setup, real UI checks, window-reuse regression,
+and cleanup procedure. The guide covers the native computer-use path and the
+local CDP fallback; report which was actually used.
+
 ## Development Rules
 
 - Keep `manifest.json` `id` aligned with the plugin folder name: `tavern`.
