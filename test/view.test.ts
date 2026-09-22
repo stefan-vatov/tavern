@@ -59,6 +59,14 @@ class FakeStyle {
 }
 
 class FakeElement {
+	ownerDocument = fakeDocument;
+	migrationListener: (() => void) | undefined;
+	onWindowMigrated(listener: () => void): () => void {
+		this.migrationListener = listener;
+		return () => {
+			this.migrationListener = undefined;
+		};
+	}
 	checked = false;
 	children: FakeElement[] = [];
 	classes = new Set<string>();
@@ -194,7 +202,9 @@ class FakeElement {
 
 class FakeDocument {
 	activeElement: FakeElement | null = null;
-	body = new FakeElement('body');
+	get body(): FakeElement {
+		return new FakeElement('body');
+	}
 	private readonly listeners = new Map<string, Listener[]>();
 
 	addEventListener(type: string, listener: Listener): void {
@@ -296,6 +306,21 @@ class FakeMenuItemApi implements FakeMenuItem {
 }
 
 vi.mock('obsidian', () => ({
+	Component: class {
+		private cleanups: (() => void)[] = [];
+		register(cleanup: () => void): void {
+			this.cleanups.push(cleanup);
+		}
+		registerDomEvent(element: FakeDocument, type: string, listener: Listener): void {
+			element.addEventListener(type, listener);
+			this.register(() => element.removeEventListener(type, listener));
+		}
+		unload(): void {
+			for (const cleanup of this.cleanups) {
+				cleanup();
+			}
+		}
+	},
 	ItemView: class {
 		app: { keymap: typeof keymapMock; scope: unknown };
 		contentEl: FakeElement;
@@ -304,6 +329,14 @@ vi.mock('obsidian', () => ({
 			this.app = { keymap: keymapMock, scope: { id: 'app-scope' } };
 			this.contentEl = new FakeElement('root');
 			rootElements.push(this.contentEl);
+		}
+
+		register(_cleanup: () => void) {}
+		addChild<Child>(child: Child): Child {
+			return child;
+		}
+		removeChild(child: { unload: () => void }): void {
+			child.unload();
 		}
 
 		getState() {
@@ -429,14 +462,13 @@ describe('tavern view', () => {
 		await view.setState({ selectedPath: '04_Projects/Pi.md' }, { history: false });
 
 		expect(view.getViewType()).toBe(TAVERN_VIEW_TYPE);
-		expect(view.getDisplayText()).toBe('Tavern projects');
+		expect(view.getDisplayText()).toBe('Tavern');
 		expect(view.getIcon()).toBe('dice');
 		expect(view.getState()).toEqual({
 			availableTasksCollapsed: false,
 			boardPage: 'global',
 			boardTaskKeys: [], // L2: intentionally added to getState for workspace roundtrip of focus queue (from settings)
 			globalTaskQuery: '',
-			mode: 'board',
 			projectQuery: '',
 			selectedPath: '04_Projects/Pi.md',
 			sidebarCollapsedSections: [],
@@ -661,7 +693,7 @@ tavern: project
 		expect(renderedText).not.toContain('#manage');
 	});
 
-	it('should render a selected project note without the global project list in note mode', async () => {
+	it('restores legacy note mode as a project inside the app shell', async () => {
 		const view = new TavernView({} as never, {
 			saveSettings: vi.fn(),
 			settings: {
@@ -675,13 +707,20 @@ tavern: project
 			}),
 		});
 
-		await view.setState({ mode: 'note', selectedPath: '04_Projects/Pi.md' }, { history: false });
+		await view.setState(
+			{ mode: 'note', boardPage: 'global', selectedPath: '04_Projects/Pi.md' },
+			{ history: false },
+		);
+		expect(view.getState()).toMatchObject({
+			boardPage: 'project',
+			selectedPath: '04_Projects/Pi.md',
+		});
 		const root = rootElements.at(-1) as FakeElement;
 
-		expect(findByClass(root, 'tavern-panel-list')).toBeUndefined();
-		expect(findByClass(root, 'tavern-note-mode')).toBeDefined();
+		expect(findByClass(root, 'tavern-panel-list')).toBeDefined();
+		expect(findByClass(root, 'tavern-app-name')?.text).toBe('Tavern');
 		expect(textValues(root)).toEqual(expect.arrayContaining(['Pi', 'Backlog', 'Build board']));
-		expect(textValues(root)).not.toContain('Blogging');
+		expect(textValues(root)).toContain('Blogging');
 	});
 
 	it('should visually de-emphasize done tasks in project sections', async () => {
@@ -1271,7 +1310,7 @@ tavern: project
 		projectFilter.value = 'draft';
 		projectFilter.dispatch('input');
 
-		expect(findByClass(root, 'tavern-panel-list')).toBeUndefined();
+		expect(findByClass(root, 'tavern-panel-list')).toBeDefined();
 		expect(findByAriaLabel(root, 'Filter project tasks')).toBe(projectFilter);
 		expect(projectFilter.value).toBe('draft');
 		expect(textValues(root)).toContain('Draft release note');
@@ -2654,48 +2693,40 @@ tavern: project
 		expect(settings.boardTaskKeys).toEqual([]);
 	});
 
-	it('should resize panels and cleanup document listeners on close', async () => {
-		const listeners = new Map<string, Listener>();
-		vi.stubGlobal('document', {
-			addEventListener: vi.fn((name: string, listener: Listener) => {
-				listeners.set(name, listener);
-			}),
-			removeEventListener: vi.fn((name: string) => {
-				listeners.delete(name);
-			}),
-		});
+	it('resizes in the owning popout document and cancels on migration, rerender and close', async () => {
 		const view = new TavernView({} as never, {
 			saveSettings: vi.fn(),
-			settings: {
-				boardTaskKeys: [],
-				projectFolders: ['04_Projects'],
-				tavernName: 'Tavern',
-			},
-			vault: createVault({
-				'04_Projects/Pi.md': PROJECT_MARKDOWN,
-			}),
+			settings: { boardTaskKeys: [], projectFolders: ['04_Projects'], tavernName: 'Tavern' },
+			vault: createVault({ '04_Projects/Pi.md': PROJECT_MARKDOWN }),
 		});
-
-		await view.onOpen();
 		const root = rootElements.at(-1) as FakeElement;
-		const handle = findByClass(root, 'tavern-resize-handle');
-		if (!handle) {
-			throw new Error('resize handle was not rendered');
-		}
-
-		handle.dispatch('mousedown', { clientX: 100, preventDefault: vi.fn() });
-		listeners.get('mousemove')?.({ clientX: 120 });
-		// dispatch mouseup on document to execute the registered doc mouseup handler (covers currentDocMouseUp?.() at ~1598)
-		fakeDocument.dispatch('mouseup');
-		await view.onClose();
-
+		const popoutDocument = new FakeDocument();
+		root.ownerDocument = popoutDocument;
+		await view.onOpen();
+		const handle = findByClass(root, 'tavern-resize-handle')!;
+		handle.dispatch('mousedown', { clientX: 100 });
+		fakeDocument.dispatch('mousemove', { clientX: 200 });
+		expect(root.style.getPropertyValue('--tavern-list-width')).toBe('');
+		popoutDocument.dispatch('mousemove', { clientX: 120 });
+		expect(root.style.getPropertyValue('--tavern-list-width')).toBe('260px');
+		popoutDocument.dispatch('mouseup');
+		popoutDocument.dispatch('mousemove', { clientX: 140 });
 		expect(root.style.getPropertyValue('--tavern-list-width')).toBe('260px');
 		expect(handle.classes.has('is-dragging')).toBe(false);
-		// registerDomEvent (Obsidian lifecycle) for document mousemove/up is used instead of manual add/remove (per AGENTS.md and Issue 7 fix).
-		// The test harness's direct 'listeners' map (for spying manual adds) may not reflect the registered handlers the same way; removal is handled internally on view close.
-		// The observable effects (width restored, !dragging class) are still asserted and pass. Skip the map check for the register-based impl.
-		// expect(listeners.has('mousemove')).toBe(false);
-		expect(true).toBe(true); // cleanup now via registerDomEvent + view lifecycle
+		handle.dispatch('mousedown', { clientX: 100 });
+		root.migrationListener?.();
+		popoutDocument.dispatch('mousemove', { clientX: 150 });
+		expect(root.style.getPropertyValue('--tavern-list-width')).toBe('260px');
+		handle.dispatch('mousedown', { clientX: 100 });
+		await view.refreshProjects();
+		popoutDocument.dispatch('mousemove', { clientX: 150 });
+		expect(handle.classes.has('is-dragging')).toBe(false);
+		const nextHandle = findByClass(root, 'tavern-resize-handle')!;
+		nextHandle.dispatch('mousedown', { clientX: 100 });
+		await view.onClose();
+		popoutDocument.dispatch('mousemove', { clientX: 180 });
+		expect(root.style.getPropertyValue('--tavern-list-width')).toBe('260px');
+		expect(nextHandle.classes.has('is-dragging')).toBe(false);
 	});
 
 	// direct exercise of private to cover the targetIndex < 0 early return in reorderTaskSelection (1466)

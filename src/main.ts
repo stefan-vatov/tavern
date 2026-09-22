@@ -1,18 +1,20 @@
-import { Notice, Plugin, TFile, type WorkspaceLeaf } from 'obsidian';
-import { createTavernViewState, shouldOpenTavernProjectFile } from './project-mode';
+import { Notice, Platform, Plugin, type WorkspaceLeaf } from 'obsidian';
+import { createTavernViewState } from './project-mode';
 import { DEFAULT_SETTINGS, TavernSettingTab } from './settings';
 import type { TavernSettings } from './settings-defaults';
 import { TAVERN_VIEW_TYPE, TavernView } from './view';
 import type { ProjectVault } from './project-vault';
 
-const FIRST_LEAF_INDEX = 0;
 const EMPTY_LEAF_COUNT = 0;
+const FIRST_LEAF_INDEX = 0;
+const APP_WINDOW_ATTRIBUTE = 'data-tavern-app-window';
 
 class TavernPlugin extends Plugin {
 	settings!: TavernSettings;
+	private unloaded = false;
+	private activation: Promise<WorkspaceLeaf | undefined> = Promise.resolve(undefined);
 
 	/* eslint-disable eslint/max-statements */
-	/* eslint-disable eslint/no-underscore-dangle */
 	async onload() {
 		await this.loadSettings();
 
@@ -33,25 +35,23 @@ class TavernPlugin extends Plugin {
 		const statusBarItemEl = this.addStatusBarItem();
 		statusBarItemEl.setText('Tavern');
 
-		this.registerEvent(
-			this.app.workspace.on('file-open', (file) => {
-				/* c8 ignore next -- file-open project routing branch (exercised in main.test but listed for branch cov); covered by explicit invokes */
-				if (file && this.isTavernProjectFile(file)) {
-					void this.activateView(file.path, this.app.workspace.activeLeaf ?? undefined);
-				}
-			}),
-		);
+		this.registerObsidianProtocolHandler('tavern', async () => {
+			await this.activateView();
+		});
+		this.app.workspace.onLayoutReady(() => {
+			if (this.app.workspace.getLeavesOfType(TAVERN_VIEW_TYPE).length > EMPTY_LEAF_COUNT) {
+				void this.activateView();
+			}
+		});
 
-		// cheap external fm/metadata listener (L3): registerEvent per AGENTS; triggers lightweight refresh hint on any open tavern views (short-circuits if none); no full load unless views active; catches mark/unmark/rename etc not covered by file-open only.
-		/* eslint-disable eslint/no-underscore-dangle */
+		// Refresh live views when project metadata changes; leave deferred views asleep.
 		this.registerEvent(
 			this.app.metadataCache.on('changed', (file) => {
 				if (file) {
-					void this._refreshOpenTavernIfNeeded(file);
+					this.refreshOpenTavern();
 				}
 			}),
 		);
-		/* eslint-enable eslint/no-underscore-dangle */
 
 		this.addCommand({
 			callback: () => {
@@ -81,22 +81,30 @@ class TavernPlugin extends Plugin {
 	}
 
 	onunload() {
+		this.unloaded = true;
 		this.app.workspace.detachLeavesOfType(TAVERN_VIEW_TYPE);
 	}
 
-	async activateView(
-		selectedPath?: string,
-		targetLeaf?: WorkspaceLeaf,
-	): Promise<WorkspaceLeaf | undefined> {
-		const leaf = await this.prepareViewLeaf(selectedPath, targetLeaf);
+	activateView(selectedPath?: string): Promise<WorkspaceLeaf | undefined> {
+		// A second command can arrive before the first view has finished opening.
+		this.activation = this.openAfterActivation(this.activation, selectedPath);
+		return this.activation;
+	}
 
-		if (!leaf) {
-			new Notice(`${this.settings.tavernName} could not open a workspace leaf.`);
+	private async openAfterActivation(
+		previous: Promise<WorkspaceLeaf | undefined>,
+		selectedPath?: string,
+	): Promise<WorkspaceLeaf | undefined> {
+		await previous;
+		if (this.unloaded) {
 			return undefined;
 		}
-
-		this.app.workspace.revealLeaf(leaf);
-		return leaf;
+		try {
+			return await this.prepareViewLeaf(selectedPath);
+		} catch {
+			new Notice(`${this.settings.tavernName} could not open its app window.`);
+			return undefined;
+		}
 	}
 
 	private async openTaskSearch(): Promise<void> {
@@ -109,28 +117,69 @@ class TavernPlugin extends Plugin {
 
 	private async prepareViewLeaf(
 		selectedPath: string | undefined,
-		targetLeaf: WorkspaceLeaf | undefined,
 	): Promise<WorkspaceLeaf | undefined> {
-		if (targetLeaf) {
-			await targetLeaf.setViewState(createTavernViewState(selectedPath, 'note'));
-			return targetLeaf;
+		const { workspace } = this.app;
+		const existingLeaves = workspace.getLeavesOfType(TAVERN_VIEW_TYPE);
+		const existing =
+			this.findAppWindowLeaf(existingLeaves) ??
+			existingLeaves.find((leaf) => leaf.getContainer() !== workspace.rootSplit) ??
+			existingLeaves[FIRST_LEAF_INDEX];
+		let leaf = existing;
+		if (!leaf) {
+			let location: 'window' | 'tab' = 'tab';
+			if (Platform.isDesktopApp) {
+				location = 'window';
+			}
+			leaf = workspace.getLeaf(location);
 		}
 
-		const existingLeaves = this.app.workspace.getLeavesOfType(TAVERN_VIEW_TYPE);
-		const leaf = existingLeaves[FIRST_LEAF_INDEX] ?? this.app.workspace.getLeaf('tab') ?? undefined;
-		if (selectedPath || existingLeaves.length === EMPTY_LEAF_COUNT) {
-			await leaf?.setViewState(createTavernViewState(selectedPath, this.viewMode(selectedPath)));
+		if (existing && Platform.isDesktopApp && leaf.getContainer() === workspace.rootSplit) {
+			workspace.moveLeafToPopout(leaf);
 		}
-
+		if (Platform.isDesktopApp && leaf.getContainer() !== workspace.rootSplit) {
+			leaf.getContainer().doc.documentElement.setAttribute(APP_WINDOW_ATTRIBUTE, 'true');
+		}
+		if (!existingLeaves.includes(leaf) || selectedPath) {
+			await leaf.setViewState(createTavernViewState(selectedPath));
+		}
+		if (this.unloaded) {
+			leaf.detach();
+			return undefined;
+		}
+		// revealLeaf also loads views that Obsidian restored in a deferred state.
+		await workspace.revealLeaf(leaf);
+		if (this.unloaded) {
+			leaf.detach();
+			return undefined;
+		}
+		for (const duplicate of existingLeaves) {
+			if (duplicate !== leaf) {
+				duplicate.detach();
+			}
+		}
 		return leaf;
 	}
 
-	private viewMode(selectedPath: string | undefined) {
-		if (selectedPath) {
-			return 'note';
+	private findAppWindowLeaf(tavernLeaves: WorkspaceLeaf[]): WorkspaceLeaf | undefined {
+		if (!Platform.isDesktopApp) {
+			return undefined;
 		}
-
-		return 'board';
+		const { workspace } = this.app;
+		let appLeaf: WorkspaceLeaf | undefined = undefined;
+		workspace.iterateAllLeaves((leaf) => {
+			const container = leaf.getContainer();
+			if (
+				!appLeaf &&
+				container !== workspace.rootSplit &&
+				container.doc.documentElement.hasAttribute(APP_WINDOW_ATTRIBUTE)
+			) {
+				appLeaf =
+					tavernLeaves.find((candidate) => candidate.getContainer() === container) ??
+					workspace.getMostRecentLeaf(container) ??
+					leaf;
+			}
+		});
+		return appLeaf;
 	}
 
 	async loadSettings() {
@@ -155,29 +204,16 @@ class TavernPlugin extends Plugin {
 		await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
 			frontmatter.tavern = 'project';
 		});
-		await this.activateView(file.path, this.app.workspace.activeLeaf ?? undefined);
+		await this.activateView(file.path);
 	}
 
-	private isTavernProjectFile(file: TFile): boolean {
-		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter ?? {};
-		return shouldOpenTavernProjectFile(frontmatter);
-	}
-
-	// tiny helper (L3) for the metadata 'changed' listener: cheap leaves check (no-op if no open taverns), delegates refresh (which does its own prune) using runtime access (avoids private + no view.ts change for this L3).
-	/* eslint-disable eslint/no-underscore-dangle, eslint/no-unused-vars */
-	private _refreshOpenTavernIfNeeded(_file: TFile): void {
-		const leaves = this.app.workspace.getLeavesOfType(TAVERN_VIEW_TYPE);
-		if (leaves.length === EMPTY_LEAF_COUNT) {
-			return;
-		}
-		leaves.forEach((leaf) => {
-			const { view } = leaf;
-			if (view && typeof (view as any).refreshProjects === 'function') {
-				void (view as any).refreshProjects();
+	private refreshOpenTavern(): void {
+		for (const leaf of this.app.workspace.getLeavesOfType(TAVERN_VIEW_TYPE)) {
+			if (leaf.view instanceof TavernView) {
+				void leaf.view.refreshProjects();
 			}
-		});
+		}
 	}
-	/* eslint-enable eslint/no-underscore-dangle, eslint/no-unused-vars */
 }
 
 const isTavernViewWithTaskSearch = (view: unknown): view is Pick<TavernView, 'openTaskSearch'> =>

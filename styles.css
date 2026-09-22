@@ -57,10 +57,6 @@
 	overflow: hidden;
 }
 
-.tavern-note-mode {
-	grid-column: 1 / -1;
-}
-
 /* Resize handles */
 .tavern-resize-handle {
 	width: 6px;
@@ -2879,4 +2875,11 @@
 
 .tavern-project-section.is-empty {
 	padding-bottom: 8px;
+}
+
+.tavern-app-name {
+	padding: 16px 16px 8px;
+	font-size: var(--font-ui-large);
+	font-weight: var(--font-semibold);
+	color: var(--text-normal);
 }

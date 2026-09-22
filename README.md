@@ -1,9 +1,32 @@
 # Tavern
 
-Tavern is a local-first Obsidian project management plugin. Project notes marked
-with Tavern frontmatter are rendered in a custom project board where tasks can be
-moved between sections, completed into `Done`, searched across projects, and
-collected into a focused cross-project queue.
+Tavern is a local-first app window backed by an Obsidian vault. Its project boards,
+task search, and cross-project focus queue live together in one Tavern interface.
+Task content stays in ordinary Markdown notes.
+
+## Open Tavern
+
+Click the dice ribbon icon or run **Tavern: Open** from Obsidian's command palette.
+On desktop this opens a separate Tavern window; opening it again brings the same
+window forward and preserves the current Tavern view. If that window is showing
+a Markdown note instead, Open returns it to Tavern in the same window, including
+after a plugin reload. Switch between the global queue and individual projects
+in its sidebar. On mobile, Tavern opens in a tab.
+
+Tavern runs inside Obsidian and shares its vault and plugin runtime. Obsidian must
+remain running. Opening a project note in Obsidian keeps the Markdown editor;
+**Tavern: Mark current note as project** marks that note and selects it in Tavern.
+The **Tavern: Open task search** command opens search in the same app window.
+
+External launchers can open the same window with a vault-specific URI:
+
+```text
+obsidian://tavern?vault=Your%20Vault%20Name
+```
+
+Replace the vault name with its URL-encoded name. Tavern must be installed and
+enabled in that vault. Existing Tavern tabs are moved into the app window when
+opened or restored, and legacy project-only views keep their selected project.
 
 ## Project Notes
 

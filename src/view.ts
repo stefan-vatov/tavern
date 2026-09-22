@@ -1,6 +1,6 @@
 /* eslint-disable eslint/func-style, eslint/max-lines, eslint/max-statements, eslint/no-magic-numbers */
 import { Effect, Exit } from 'effect';
-import { ItemView, Menu, Notice, Scope, setIcon, type WorkspaceLeaf } from 'obsidian';
+import { Component, ItemView, Menu, Notice, Scope, setIcon, type WorkspaceLeaf } from 'obsidian';
 import { addTaskToFocusQueue, createProjectBoardModel } from './project-board-model';
 import {
 	filterTasks,
@@ -23,7 +23,7 @@ import {
 	reorderVaultProjectTask,
 	type ProjectVault,
 } from './project-vault';
-import { TAVERN_VIEW_TYPE, type TavernViewMode } from './project-mode';
+import { TAVERN_VIEW_TYPE } from './project-mode';
 import type { TavernSettings } from './settings-defaults';
 
 const LIST_RESIZE = {
@@ -77,7 +77,6 @@ class TavernView extends ItemView {
 	private availableTasksCollapsed: boolean;
 	private boardPage: TavernBoardPage = 'global';
 	private globalTaskQuery = '';
-	private mode: TavernViewMode = 'board';
 	private overlayScope: Scope | null = null;
 	private projectQuery = '';
 	private query = '';
@@ -85,12 +84,6 @@ class TavernView extends ItemView {
 	private searchOverlayOpen = false;
 	private selectedPath = '';
 	private sidebarCollapsedSections: Set<string>;
-	// Per-view guard so document-level mousemove/mouseup registerDomEvent (for resize) happen only once.
-	// Subsequent createResizeHandle (from re-renders in renderShell) only update the current handler pointers;
-	// per-render mousedown + local isResizing gating + dragCleanup kept exactly as-is.
-	private docResizeListenersRegistered = false;
-	private currentDocMouseMove: ((event: MouseEvent) => void) | null = null;
-	private currentDocMouseUp: (() => void) | null = null;
 	private closed = false;
 
 	constructor(
@@ -107,7 +100,7 @@ class TavernView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return 'Tavern projects';
+		return this.deps.settings.tavernName;
 	}
 
 	getIcon(): string {
@@ -115,6 +108,7 @@ class TavernView extends ItemView {
 	}
 
 	async onOpen(): Promise<void> {
+		this.register(this.contentEl.onWindowMigrated(() => this.dragCleanup?.()));
 		this.renderShell();
 		await this.refreshProjects();
 	}
@@ -134,7 +128,6 @@ class TavernView extends ItemView {
 			availableTasksCollapsed: this.availableTasksCollapsed,
 			boardPage: this.boardPage,
 			globalTaskQuery: this.globalTaskQuery,
-			mode: this.mode,
 			projectQuery: this.projectQuery,
 			selectedPath: this.selectedPath,
 			sidebarCollapsedSections: [...this.sidebarCollapsedSections],
@@ -147,10 +140,10 @@ class TavernView extends ItemView {
 		if (typeof state.selectedPath === 'string') {
 			this.selectedPath = state.selectedPath;
 		}
-		if (state.mode === 'board' || state.mode === 'note') {
-			this.mode = state.mode;
-		}
-		if (state.boardPage === 'global' || state.boardPage === 'project') {
+		// Older workspaces stored project-only views as note mode.
+		if (state.mode === 'note') {
+			this.boardPage = 'project';
+		} else if (state.boardPage === 'global' || state.boardPage === 'project') {
 			this.boardPage = state.boardPage;
 		}
 		if (typeof state.globalTaskQuery === 'string') {
@@ -183,7 +176,7 @@ class TavernView extends ItemView {
 		await this.deps.saveSettings();
 	}
 
-	private async refreshProjects(): Promise<void> {
+	async refreshProjects(): Promise<void> {
 		/* c8 ignore next -- closed guard; prevents post-onClose async from prior refresh/render/mutations (L4); mirrors inactive resize guards + c8 pattern */
 		// eslint-disable-next-line eslint/no-underscore-dangle, curly
 		if (this.closed) {
@@ -220,7 +213,7 @@ class TavernView extends ItemView {
 		}
 
 		// only override selectedPath if current is absent/invalid in fresh library (preserve setState/UI selections; reconcile external delete only)
-		if (this.mode === 'note' || this.boardPage === 'project') {
+		if (this.boardPage === 'project') {
 			if (
 				!this.selectedPath ||
 				!this.library.projects.some((proj) => proj.path === this.selectedPath)
@@ -238,16 +231,9 @@ class TavernView extends ItemView {
 		if (this.closed) {
 			return;
 		}
+		this.dragCleanup?.();
 		this.contentEl.empty();
 		this.contentEl.addClass('tavern-container');
-
-		if (this.mode === 'note') {
-			const detailEl = this.contentEl.createDiv(
-				'tavern-panel tavern-panel-detail tavern-note-mode',
-			);
-			this.renderDetail(detailEl);
-			return;
-		}
 
 		const listEl = this.contentEl.createDiv('tavern-panel tavern-panel-list');
 		this.createResizeHandle(this.contentEl, listEl, LIST_RESIZE);
@@ -264,6 +250,7 @@ class TavernView extends ItemView {
 		containerEl.empty();
 		containerEl.addClass('tavern-list');
 
+		containerEl.createDiv({ cls: 'tavern-app-name', text: this.deps.settings.tavernName });
 		this.renderSearch(containerEl);
 		const itemsEl = containerEl.createDiv('tavern-list-items');
 		this.renderListItems(itemsEl);
@@ -574,7 +561,7 @@ class TavernView extends ItemView {
 			return;
 		}
 
-		if (this.mode === 'board' && this.boardPage === 'global') {
+		if (this.boardPage === 'global') {
 			this.renderGlobalWorkQueue(containerEl);
 			return;
 		}
@@ -721,7 +708,7 @@ class TavernView extends ItemView {
 
 	private renderProjectLists(containerEl: HTMLElement, project: ProjectSummary): void {
 		const body = containerEl.createDiv('tavern-detail-body');
-		if (this.mode === 'board' && this.boardPage === 'global') {
+		if (this.boardPage === 'global') {
 			this.renderFocusQueue(body);
 		}
 		this.renderProjectFilter(body, () => {
@@ -1577,39 +1564,23 @@ class TavernView extends ItemView {
 			container.style.setProperty(config.cssVar, `${width}px`);
 		};
 
-		const onMouseUp = () => {
-			/* c8 ignore next -- early return guard for inactive resize */
-			if (!isResizing) {
-				return;
-			}
-			isResizing = false;
-			handle.removeClass('is-dragging');
-			this.dragCleanup = null;
-		};
-
-		// Guarded doc registration (only once per view) using delegators; currents updated every handle creation (re-render).
-		// This prevents accumulation while the per-render mousedown, local isResizing, onMouse* gating, and dragCleanup remain exactly unchanged.
-		this.currentDocMouseMove = onMouseMove;
-		this.currentDocMouseUp = onMouseUp;
-		if (!this.docResizeListenersRegistered) {
-			/* c8 ignore next -- doc resize listeners registered once per view lifecycle (on first handle); later renders hit the guard; initial path covered */
-			this.registerDomEvent(document as Document, 'mousemove', (event: MouseEvent) => {
-				this.currentDocMouseMove?.(event);
-			});
-			this.registerDomEvent(document as Document, 'mouseup', () => {
-				/* c8 ignore next -- doc mouseup handler body for resize (dispatched in resize test; listed in branch cov) */
-				this.currentDocMouseUp?.();
-			});
-			this.docResizeListenersRegistered = true;
-		}
-
 		this.registerDomEvent(handle, 'mousedown', (event: MouseEvent) => {
 			event.preventDefault();
+			this.dragCleanup?.();
 			startX = event.clientX;
 			startWidth = parseInt(container.style.getPropertyValue(config.cssVar)) || panel.offsetWidth;
 			handle.addClass('is-dragging');
 			isResizing = true;
-			this.dragCleanup = onMouseUp;
+			const dragEvents = this.addChild(new Component());
+			const stopResize = () => {
+				isResizing = false;
+				handle.removeClass('is-dragging');
+				this.removeChild(dragEvents);
+				this.dragCleanup = null;
+			};
+			dragEvents.registerDomEvent(container.ownerDocument, 'mousemove', onMouseMove);
+			dragEvents.registerDomEvent(container.ownerDocument, 'mouseup', stopResize);
+			this.dragCleanup = stopResize;
 		});
 
 		return handle;
