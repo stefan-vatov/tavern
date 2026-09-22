@@ -24,3 +24,6 @@ coverage/
 .stryker-tmp/
 reports/mutation/
 reports/stryker-incremental.json
+
+# Non-authoritative local Canon notes
+canon/scratch/

@@ -75,6 +75,21 @@ function buildFile(overrides: Partial<ProjectSourceFile>): ProjectSourceFile {
 
 describe('project library', () => {
 	describe('buildProjectLibrary', () => {
+		it.each([
+			['03__Waiting__Room__', 'Waiting Room'],
+			['Room3_Archive', 'Room3 Archive'],
+			['10Waiting', '10Waiting'],
+		])('should derive a readable folder label from %s', (folder, expected) => {
+			const library = Effect.runSync(
+				buildProjectLibrary({
+					folders: ['04_Projects'],
+					files: [buildFile({ path: ['04_Projects', folder, 'Pi.md'].join('/') })],
+				}),
+			);
+
+			expect(library.projects[0]?.folderName).toBe(expected);
+		});
+
 		it('should include only marked project notes inside configured folders', () => {
 			const library = Effect.runSync(
 				buildProjectLibrary({
@@ -318,6 +333,46 @@ tavern: project
 	});
 
 	describe('selectedProjectTasks', () => {
+		it('should expand only the selected tree within its own project and section', () => {
+			const markdown = [
+				'---',
+				'tavern: project',
+				'---',
+				'## Backlog',
+				'- [ ] First parent',
+				'  - [ ] First child',
+				'- [ ] Selected parent',
+				'  - [ ] Selected child',
+				'    - [ ] Selected grandchild',
+				'- [ ] Last parent',
+				'## Later',
+				'- [ ] Later first',
+				'- [ ] Later second',
+				'- [ ] Later third',
+				'  - [ ] Later child',
+			].join('\n');
+			const selectedPath = '04_Projects/Selected.md';
+			const library = Effect.runSync(
+				buildProjectLibrary({
+					folders: ['04_Projects'],
+					files: [
+						buildFile({ markdown, path: '04_Projects/Other.md' }),
+						buildFile({ markdown, path: selectedPath }),
+					],
+				}),
+			);
+			const parent = projectTasks(library).find(
+				(task) => task.projectPath === selectedPath && task.text === 'Selected parent',
+			);
+			const selected = selectedProjectTasks(library, [taskSelectionKey(parent)]);
+
+			expect(selected.map((task) => [task.projectPath, task.text])).toEqual([
+				[selectedPath, 'Selected parent'],
+				[selectedPath, 'Selected child'],
+				[selectedPath, 'Selected grandchild'],
+			]);
+		});
+
 		it('should return board tasks in the selected order', () => {
 			const library = Effect.runSync(
 				buildProjectLibrary({

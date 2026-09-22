@@ -5,15 +5,14 @@ minimum_prek_version = "0.3.0"
 [[repos]]
 repo = "builtin"
 hooks = [
-	{ id = "trailing-whitespace" },
+	# Preserve intentional Markdown hard line breaks in the upstream documents.
+	{ id = "trailing-whitespace", args = ["--markdown-linebreak-ext=md"] },
 	{ id = "end-of-file-fixer" },
 	{ id = "mixed-line-ending" },
 	{ id = "fix-byte-order-marker" },
 	{ id = "check-case-conflict" },
 	{ id = "check-merge-conflict" },
-	{ id = "check-added-large-files", args = [
-		"--maxkb=500",
-	] },
+	{ id = "check-added-large-files", args = ["--maxkb=500"] },
 	{ id = "check-vcs-permalinks" },
 	{ id = "detect-private-key" },
 	{ id = "check-symlinks" },

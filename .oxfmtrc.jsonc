@@ -10,6 +10,22 @@
 		".turbo",
 		"out",
 		"out-tsc",
+		// Preserve the upstream-owned Canon skill copies for verified upgrades.
+		".agents/skills/compact-canon",
+		".codex/skills/compact-canon",
+		".claude/skills/compact-canon",
+		// Keep the canonical Harder to Fool documents byte-identical to upstream.
+		".ai/harder-to-fool",
+		// Preserve the upstream Agent Constitution skills and bundled references.
+		".agents/skills/write-constitution",
+		".agents/skills/constitution-decide",
+		".agents/skills/constitution-verify",
+		".codex/skills/write-constitution",
+		".codex/skills/constitution-decide",
+		".codex/skills/constitution-verify",
+		".claude/skills/write-constitution",
+		".claude/skills/constitution-decide",
+		".claude/skills/constitution-verify",
 	],
 	"printWidth": 100,
 	"semi": true,

@@ -317,17 +317,25 @@ describe('project vault adapter', () => {
 
 	// TDD confirmation for p5 vault path lookup residual (normalize to handle trailing /, \, etc vs stored projectPath)
 	// Regression test for Pass 5 fixed issue C1 (vault path lookup now normalizes like library to handle trailing /, \, etc vs stored projectPath from previous load): prevents regression of "file not found" on external rename/move or normalization variance during actions.
-	it('should succeed for actions even if the projectPath has different normalization (e.g. trailing slash) than the current vault file list', async () => {
-		const vault: ProjectVault = {
-			getMarkdownFiles: () => [{ path: '04_Projects/Pi.md/' }], // trailing / (common variance)
-			modify: vi.fn(async () => {}), // spy + returns promise so tryPromise succeeds and .toHaveBeenCalled works
-			read: async () => PROJECT_MARKDOWN,
-		};
-		const library = await Effect.runPromise(loadVaultProjectLibrary(vault, ['04_Projects']));
-		const task = projectTasks(library).find((item) => item.text === 'Wire vault')!;
-		// simulate task/projectPath from previous load with clean path (without trailing)
-		const taskWithCleanPath = { ...task, projectPath: '04_Projects/Pi.md' };
-		await Effect.runPromise(completeVaultProjectTask(vault, taskWithCleanPath));
-		expect(vault.modify).toHaveBeenCalled();
-	});
+	it.each([
+		['04_Projects/Pi.md/', '04_Projects/Pi.md'],
+		['  ///04_Projects/Pi.md///  ', '04_Projects/Pi.md'],
+		['04_Projects/Pi.md', '  ///04_Projects/Pi.md///  '],
+		['04_Projects/Pi.md', '04_Projects\\Pi.md'],
+	])(
+		'should update the correct file when stored path %s is referenced as %s',
+		async (filePath, taskPath) => {
+			const { files, vault } = buildVault({
+				'04_ProjectsPi.md': PROJECT_MARKDOWN,
+				[filePath]: PROJECT_MARKDOWN,
+			});
+			const library = await Effect.runPromise(loadVaultProjectLibrary(vault, ['04_Projects']));
+			const task = projectTasks(library).find((item) => item.text === 'Wire vault')!;
+
+			await Effect.runPromise(completeVaultProjectTask(vault, { ...task, projectPath: taskPath }));
+
+			expect(files[filePath]).toContain('## Done\n\n- [x] Wire vault');
+			expect(files['04_ProjectsPi.md']).toBe(PROJECT_MARKDOWN);
+		},
+	);
 });

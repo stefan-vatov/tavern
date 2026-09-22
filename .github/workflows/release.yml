@@ -26,6 +26,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check Harder to Fool protocol sync
+        run: python3 .ai/harder-to-fool/check_sync.py .ai/harder-to-fool/CODE.md AGENTS.md
+
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:

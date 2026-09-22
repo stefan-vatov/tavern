@@ -67,6 +67,30 @@ describe('project note domain', () => {
 	});
 
 	describe('parseProjectNote', () => {
+		it('should keep frontmatter separate from body text and preserve it through task edits', () => {
+			const markdown = [
+				'---',
+				'tavern: project',
+				'Title:   Metadata title   ',
+				'# A frontmatter comment',
+				'---',
+				'#   Visible heading   ',
+				'',
+				'Title: Body prose',
+				'',
+				'## Work',
+				'- [ ] First task',
+			].join('\n');
+			const note = Effect.runSync(parseProjectNote(markdown));
+			const added = Effect.runSync(addTaskToSection(note, 'Work', 'Next task'));
+
+			expect(note.title).toBe('Visible heading');
+			expect(note.frontmatter).toEqual({ tavern: 'project', Title: 'Metadata title' });
+			expect(added.frontmatter).toEqual(note.frontmatter);
+			expect(serializeProjectNote(added)).toContain('Title:   Metadata title   ');
+			expect(serializeProjectNote(note)).toBe(markdown);
+		});
+
 		it('should parse frontmatter, title, arbitrary sections, and tasks', () => {
 			const note = Effect.runSync(parseProjectNote(PROJECT_MARKDOWN));
 
@@ -234,6 +258,85 @@ not a task - [ ] nope
 	});
 
 	describe('moveTaskToPosition', () => {
+		it('should insert a nested task tree before the target parent’s existing children', () => {
+			const markdown = [
+				'---',
+				'tavern: project',
+				'---',
+				'## Work',
+				'- [ ] Parent',
+				'  - [ ] Existing child',
+				'- [ ] Incoming',
+				'  - [ ] Incoming child',
+				'- [ ] Other',
+			].join('\n');
+			const note = Effect.runSync(parseProjectNote(markdown));
+			const { tasks } = note.sections[0]!;
+			const moved = Effect.runSync(
+				moveTaskToPosition({
+					note,
+					placement: 'child',
+					sourceTaskId: tasks[2]!.id,
+					targetTaskId: tasks[0]!.id,
+				}),
+			);
+
+			expect(moved.sections[0]!.tasks.map((task) => [task.text, task.indent])).toEqual([
+				['Parent', ''],
+				['Incoming', '  '],
+				['Incoming child', '    '],
+				['Existing child', '  '],
+				['Other', ''],
+			]);
+			expect(serializeProjectNote(note)).toBe(markdown);
+		});
+
+		it.each([
+			{
+				placement: 'before' as const,
+				order: ['Before', 'Incoming', 'Incoming child', 'Target', 'Target child', 'After'],
+			},
+			{
+				placement: 'after' as const,
+				order: ['Before', 'Target', 'Target child', 'Incoming', 'Incoming child', 'After'],
+			},
+		])(
+			'should move a whole tree $placement a later position in another section',
+			({ placement, order }) => {
+				const note = Effect.runSync(
+					parseProjectNote(
+						[
+							'---',
+							'tavern: project',
+							'---',
+							'## Source',
+							'- [ ] Incoming',
+							'  - [ ] Incoming child',
+							'## Destination',
+							'- [ ] Before',
+							'- [ ] Target',
+							'  - [ ] Target child',
+							'- [ ] After',
+						].join('\n'),
+					),
+				);
+				const moved = Effect.runSync(
+					moveTaskToPosition({
+						note,
+						placement,
+						sourceTaskId: note.sections[0]!.tasks[0]!.id,
+						targetTaskId: note.sections[1]!.tasks[1]!.id,
+					}),
+				);
+
+				expect(moved.sections[0]!.tasks).toEqual([]);
+				expect(moved.sections[1]!.tasks.map((task) => task.text)).toEqual(order);
+				expect(
+					moved.sections[1]!.tasks.find((task) => task.text === 'Incoming child')?.indent,
+				).toBe('  ');
+			},
+		);
+
 		it('should move a task before a target task in another section', () => {
 			const serialized = Effect.runSync(
 				parseProjectNote(PROJECT_MARKDOWN).pipe(
@@ -574,6 +677,31 @@ tavern: project
 	});
 
 	describe('reorderTask', () => {
+		it('should move past the first task tree even when the section has no leading blank line', () => {
+			const note = Effect.runSync(
+				parseProjectNote(
+					[
+						'---',
+						'tavern: project',
+						'---',
+						'## Work',
+						'- [ ] First',
+						'  - [ ] First child',
+						'- [ ] Second',
+						'  - [ ] Second child',
+					].join('\n'),
+				),
+			);
+			const moved = Effect.runSync(reorderTask(note, note.sections[0]!.tasks[2]!.id, 'up'));
+
+			expect(moved.sections[0]!.tasks.map((task) => [task.text, task.indent])).toEqual([
+				['Second', ''],
+				['Second child', '  '],
+				['First', ''],
+				['First child', '  '],
+			]);
+		});
+
 		it('should move a task up within its section', () => {
 			const serialized = Effect.runSync(
 				parseProjectNote(PROJECT_MARKDOWN).pipe(
