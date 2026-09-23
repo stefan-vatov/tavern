@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/stefan-vatov/tavern/compare/1.1.0...1.2.0) (2026-09-23)
+
+
+### Features
+
+* polish task interactions and motion ([64a773b](https://github.com/stefan-vatov/tavern/commit/64a773b9aded5ec938d7abe41d994273f2d88d16))
+
 # [1.1.0](https://github.com/stefan-vatov/tavern/compare/1.0.5...1.1.0) (2026-09-22)
 
 ### Features
