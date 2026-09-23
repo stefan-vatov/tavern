@@ -408,6 +408,17 @@ const textValues = (root: FakeElement): string[] =>
 const findByAriaLabel = (root: FakeElement, label: string): FakeElement | undefined =>
 	allElements(root).find((element) => element.attr['aria-label'] === label);
 
+const dragHandleFor = (row: FakeElement | undefined): FakeElement => {
+	if (!row) {
+		throw new Error('task row was not rendered');
+	}
+	const handle = row.children.find((element) => element.classes.has('tavern-task-drag-handle'));
+	if (!handle) {
+		throw new Error('task drag handle was not rendered');
+	}
+	return handle;
+};
+
 const findByClass = (root: FakeElement, className: string): FakeElement | undefined =>
 	allElements(root).find((element) => element.classes.has(className));
 
@@ -649,6 +660,14 @@ describe('tavern view', () => {
 
 		expect(textValues(root)).toContain('Build board');
 		expect(textValues(root)).not.toContain('Global work queue');
+		expect(findByClass(root, 'tavern-panel-detail')?.classes.has('is-entering')).toBe(true);
+
+		const selectedProjectTitle = findByText(root, 'Pi');
+		if (!selectedProjectTitle?.parent?.parent) {
+			throw new Error('selected project card was not rendered');
+		}
+		selectedProjectTitle.parent.parent.dispatch('click');
+		expect(findByClass(root, 'tavern-panel-detail')?.classes.has('is-entering')).toBe(false);
 
 		const globalTitle = findByText(root, 'Global queue');
 		if (!globalTitle?.parent?.parent) {
@@ -658,6 +677,7 @@ describe('tavern view', () => {
 		globalTitle.parent.parent.dispatch('click');
 
 		expect(textValues(root)).toContain('Global work queue');
+		expect(findByClass(root, 'tavern-panel-detail')?.classes.has('is-entering')).toBe(true);
 	});
 
 	it('should omit low-value metadata labels from sidebar cards and project headers', async () => {
@@ -854,9 +874,59 @@ tavern: project
 		);
 		expect(findByAriaLabel(overlay, 'Complete Draft post')).toBeDefined();
 		expect(findByAriaLabel(overlay, 'Queue task')).toBeDefined();
+		const globalTaskRow = findByClass(overlay, 'tavern-search-task');
+		expect(globalTaskRow?.draggable).toBe(false);
+		expect(dragHandleFor(globalTaskRow).draggable).toBe(true);
+		expect(findByAriaLabel(overlay, 'Edit Draft post')).toBeDefined();
 		expect(textValues(overlay)).not.toContain('Projects');
 		expect(textValues(overlay)).not.toContain('Build board');
 		expect(textValues(root)).toContain('Pi');
+	});
+
+	it('should edit a task directly from global search with a single click', async () => {
+		const files = { '04_Projects/Blogging.md': OTHER_MARKDOWN };
+		const vault = createVault(files);
+		const view = new TavernView({} as never, {
+			saveSettings: vi.fn(),
+			settings: {
+				boardTaskKeys: [],
+				projectFolders: ['04_Projects'],
+				tavernName: 'Tavern',
+			},
+			vault,
+		});
+
+		await view.onOpen();
+		const root = rootElements.at(-1) as FakeElement;
+		const searchInput = allElements(root).find(
+			(element) => element.tag === 'input' && element.type === 'text',
+		);
+		if (!searchInput) {
+			throw new Error('search input was not rendered');
+		}
+		searchInput.value = 'Draft';
+		searchInput.dispatch('input');
+
+		const overlay = findByClass(root, 'tavern-search-overlay');
+		const label = overlay && findByAriaLabel(overlay, 'Edit Draft post');
+		if (!label) {
+			throw new Error('editable search result was not rendered');
+		}
+		label.dispatch('click', { preventDefault: vi.fn(), stopPropagation: vi.fn() });
+		const editor = findByAriaLabel(root, 'Task text for Draft post');
+		if (!editor) {
+			throw new Error('search result editor did not open on click');
+		}
+		expect(editor.focused).toBe(true);
+		editor.value = 'Publish the draft';
+		editor.dispatch('keydown', {
+			key: 'Enter',
+			preventDefault: vi.fn(),
+			stopPropagation: vi.fn(),
+		});
+		await vi.waitFor(() => expect(vault.modify).toHaveBeenCalledTimes(1));
+
+		expect(files['04_Projects/Blogging.md']).toContain('- [ ] Publish the draft');
 	});
 
 	it('should close the global search overlay from escape without bubbling to obsidian', async () => {
@@ -1354,7 +1424,7 @@ tavern: project
 		expect(files['04_Projects/Pi.md']).toContain('- [ ] Build board\n- [ ] Review task creation');
 	});
 
-	it('should edit project task text inline without taking over row dragging', async () => {
+	it('should edit project task text on click and drag only from its handle', async () => {
 		const files = {
 			'04_Projects/Pi.md': PROJECT_MARKDOWN,
 		};
@@ -1375,15 +1445,23 @@ tavern: project
 		if (!editLabel) {
 			throw new Error('editable task label was not rendered');
 		}
+		const taskRow = editLabel.parent;
+		const dragHandle = dragHandleFor(taskRow);
+		expect(taskRow?.draggable).toBe(false);
+		expect(dragHandle.draggable).toBe(true);
+		expect(dragHandle.tagName).toBe('BUTTON');
 
-		editLabel.dispatch('dblclick', { preventDefault: vi.fn(), stopPropagation: vi.fn() });
+		editLabel.dispatch('click', { preventDefault: vi.fn(), stopPropagation: vi.fn() });
 		const editor = findByAriaLabel(root, 'Task text for Build board');
 		if (!editor) {
 			throw new Error('task edit input was not rendered');
 		}
-		const stopDrag = vi.fn();
+		expect(editor.focused).toBe(true);
 
-		editor.dispatch('dragstart', { stopPropagation: stopDrag });
+		dragHandle.dispatch('dragstart', { dataTransfer: { setData: vi.fn() } });
+		expect(taskRow?.classes.has('is-dragging-task')).toBe(true);
+		dragHandle.dispatch('dragend');
+		expect(taskRow?.classes.has('is-dragging-task')).toBe(false);
 		editor.value = 'Build inline editor';
 		editor.dispatch('keydown', {
 			key: 'Enter',
@@ -1392,7 +1470,6 @@ tavern: project
 		});
 		await vi.waitFor(() => expect(vault.modify).toHaveBeenCalledTimes(1));
 
-		expect(stopDrag).toHaveBeenCalledTimes(1);
 		expect(files['04_Projects/Pi.md']).toContain('- [ ] Build inline editor');
 		expect(files['04_Projects/Pi.md']).not.toContain('- [ ] Build board');
 	});
@@ -1493,7 +1570,7 @@ tavern: project
 			throw new Error('editable task label was not rendered');
 		}
 
-		editLabel.dispatch('dblclick', { preventDefault: vi.fn(), stopPropagation: vi.fn() });
+		editLabel.dispatch('click', { preventDefault: vi.fn(), stopPropagation: vi.fn() });
 		const editor = findByAriaLabel(rootElements.at(-1) as FakeElement, 'Task text for Build board');
 		if (!editor) {
 			throw new Error('task edit input was not rendered');
@@ -1958,8 +2035,10 @@ tavern: project
 		if (!taskEl || !focusQueue) {
 			throw new Error('task row or focus queue was not rendered');
 		}
+		expect(taskEl.draggable).toBe(false);
+		expect(dragHandleFor(taskEl).draggable).toBe(true);
 
-		taskEl.dispatch('dragstart', {
+		dragHandleFor(taskEl).dispatch('dragstart', {
 			dataTransfer: {
 				setData: (type: string, value: string) => dragData.set(type, value),
 			},
@@ -1997,7 +2076,7 @@ tavern: project
 			throw new Error('parent task or focus queue was not rendered');
 		}
 
-		parentTask.dispatch('dragstart', {
+		dragHandleFor(parentTask).dispatch('dragstart', {
 			dataTransfer: {
 				setData: (type: string, value: string) => dragData.set(type, value),
 			},
@@ -2073,7 +2152,7 @@ tavern: project
 			throw new Error('drag source or focus queue was not rendered');
 		}
 
-		taskEl.dispatch('dragstart', {
+		dragHandleFor(taskEl).dispatch('dragstart', {
 			dataTransfer: {
 				setData: vi.fn(),
 			},
@@ -2086,7 +2165,7 @@ tavern: project
 		focusQueue.dispatch('dragleave');
 		expect(focusQueue.classes.has('is-drop-target')).toBe(false);
 
-		taskEl.dispatch('dragend');
+		dragHandleFor(taskEl).dispatch('dragend');
 		expect(taskEl.classes.has('is-dragging-task')).toBe(false);
 	});
 
@@ -2118,8 +2197,10 @@ tavern: project
 		if (focusRows.length < 2) {
 			throw new Error('focus queue rows were not rendered');
 		}
+		expect(focusRows[0]?.draggable).toBe(false);
+		expect(dragHandleFor(focusRows[0]).draggable).toBe(true);
 
-		focusRows[1]?.dispatch('dragstart', {
+		dragHandleFor(focusRows[1]).dispatch('dragstart', {
 			dataTransfer: {
 				setData: (type: string, value: string) => dragData.set(type, value),
 			},
@@ -2165,7 +2246,7 @@ tavern: project
 			throw new Error('focus queue rows were not rendered');
 		}
 
-		parentRow.dispatch('dragstart', {
+		dragHandleFor(parentRow).dispatch('dragstart', {
 			dataTransfer: {
 				setData: (type: string, value: string) => dragData.set(type, value),
 			},
@@ -2314,7 +2395,7 @@ tavern: project
 			throw new Error('drag source or done section was not rendered');
 		}
 
-		taskEl.dispatch('dragstart', {
+		dragHandleFor(taskEl).dispatch('dragstart', {
 			dataTransfer: {
 				setData: (type: string, value: string) => dragData.set(type, value),
 			},
@@ -2432,7 +2513,7 @@ tavern: project
 			throw new Error('task rows were not rendered');
 		}
 
-		firstTask.dispatch('dragstart', {
+		dragHandleFor(firstTask).dispatch('dragstart', {
 			dataTransfer: {
 				setData: (type: string, value: string) => dragData.set(type, value),
 			},
@@ -2490,13 +2571,13 @@ tavern: project
 			throw new Error('task rows were not rendered');
 		}
 
-		childCandidate.dispatch('dragstart', {
+		dragHandleFor(childCandidate).dispatch('dragstart', {
 			dataTransfer: {
 				setData: (type: string, value: string) => dragData.set(type, value),
 			},
 		});
 		parentTask.dispatch('drop', {
-			clientX: 48,
+			clientX: 80,
 			clientY: 12,
 			dataTransfer: { getData: (type: string) => dragData.get(type) ?? '' },
 			preventDefault: vi.fn(),
@@ -2522,7 +2603,7 @@ tavern: project
 			throw new Error('updated task rows were not rendered');
 		}
 
-		nestedTask.dispatch('dragstart', {
+		dragHandleFor(nestedTask).dispatch('dragstart', {
 			dataTransfer: {
 				setData: (type: string, value: string) => dragData.set(type, value),
 			},
@@ -2566,7 +2647,11 @@ tavern: project
 		taskEl.dispatch('dragover', { clientX: 0, clientY: 2, preventDefault: vi.fn() });
 		expect(taskEl.classes.has('is-drop-before')).toBe(true);
 
-		taskEl.dispatch('dragover', { clientX: 48, clientY: 12, preventDefault: vi.fn() });
+		taskEl.dispatch('dragover', { clientX: 62, clientY: 12, preventDefault: vi.fn() });
+		expect(taskEl.classes.has('is-drop-after')).toBe(true);
+		expect(taskEl.classes.has('is-drop-child')).toBe(false);
+
+		taskEl.dispatch('dragover', { clientX: 63, clientY: 12, preventDefault: vi.fn() });
 		expect(taskEl.classes.has('is-drop-before')).toBe(false);
 		expect(taskEl.classes.has('is-drop-child')).toBe(true);
 
@@ -2574,7 +2659,7 @@ tavern: project
 		expect(taskEl.classes.has('is-drop-child')).toBe(false);
 		expect(taskEl.classes.has('is-drop-after')).toBe(true);
 
-		// middle y (between 0.33-0.67) + low x (<36 offset) hits final else 'after' return in taskDropPlacement
+		// Middle y with the pointer left of the drag-handle + checkbox columns lands after the task.
 		taskEl.dispatch('dragover', { clientX: 0, clientY: 15, preventDefault: vi.fn() });
 		expect(taskEl.classes.has('is-drop-after')).toBe(true);
 

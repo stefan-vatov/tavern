@@ -49,3 +49,19 @@ Global task search returns task rows across projects, with controls for opening
 the source project, completing tasks, and changing queue selection. A project
 with no matching tasks does not become a task result merely because its title
 matches.
+
+## Task row interactions
+
+Project, available-task, focus-queue, and search-result rows use a dedicated
+drag handle as their drag source. The handle appears on row hover or keyboard
+focus and stays visible on touch-only displays. Dragging elsewhere on a row does
+not move it. Clicking editable task text opens the inline editor; Enter saves
+and Escape cancels. Markdown links in task text remain clickable. Clicking
+elsewhere on a search result continues to open its source project.
+
+## Motion feedback
+
+Switching between the global queue and a project uses a brief detail-panel
+transition. Cards, controls, task rows, and drop targets use short state
+transitions. Search and text filtering update immediately. When reduced motion
+is requested, movement is removed while opacity and color state cues remain.

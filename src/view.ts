@@ -36,7 +36,7 @@ const DONE_SECTION_NAME = 'Done';
 const TASK_ID_MIME = 'text/plain';
 const TASK_QUEUE_KEY_MIME = 'application/x-tavern-task-key';
 const QUEUE_KEY_MIME = 'application/x-tavern-queue-key';
-const NEST_TASK_OFFSET = 36;
+const NEST_TASK_OFFSET = 63;
 const TASK_DROP_EDGE_RATIO = 0.33;
 
 type ResizeConfig = {
@@ -225,7 +225,7 @@ class TavernView extends ItemView {
 		this.renderShell();
 	}
 
-	private renderShell(): void {
+	private renderShell(animateDetail = false): void {
 		/* c8 ignore next -- closed guard; prevents post-onClose async from prior refresh/render/mutations (L4); mirrors inactive resize guards + c8 pattern */
 		// eslint-disable-next-line eslint/no-underscore-dangle, curly
 		if (this.closed) {
@@ -239,6 +239,9 @@ class TavernView extends ItemView {
 		this.createResizeHandle(this.contentEl, listEl, LIST_RESIZE);
 
 		const detailEl = this.contentEl.createDiv('tavern-panel tavern-panel-detail');
+		if (animateDetail) {
+			detailEl.addClass('is-entering');
+		}
 
 		this.renderList(listEl, () => {
 			this.renderDetail(detailEl);
@@ -460,6 +463,10 @@ class TavernView extends ItemView {
 	private renderTaskSearchResult(containerEl: HTMLElement, task: ProjectBoardTask): void {
 		const row = containerEl.createDiv('tavern-project-task tavern-search-task');
 		this.applyTaskNesting(row, task);
+		this.renderTaskDragHandle(row, task.text, (event) => {
+			event.dataTransfer?.setData(TASK_ID_MIME, task.id);
+			event.dataTransfer?.setData(TASK_QUEUE_KEY_MIME, taskSelectionKey(task));
+		});
 		if (this.isTaskSelected(task)) {
 			row.addClass('is-in-global-queue');
 		}
@@ -485,7 +492,7 @@ class TavernView extends ItemView {
 		});
 
 		const content = row.createSpan('tavern-global-task-content');
-		content.createSpan({ cls: 'tavern-project-task-text', text: task.text || 'Untitled task' });
+		this.renderEditableTaskText(content, task, task.text);
 		content.createSpan({
 			cls: 'tavern-global-task-project',
 			text: `${task.projectTitle} / ${task.sectionName}`,
@@ -495,10 +502,11 @@ class TavernView extends ItemView {
 	}
 
 	private openTaskProject(task: ProjectBoardTask): void {
+		const animateDetail = this.boardPage !== 'project' || this.selectedPath !== task.projectPath;
 		this.boardPage = 'project';
 		this.selectedPath = task.projectPath;
 		this.closeSearchOverlay(false);
-		this.renderShell();
+		this.renderShell(animateDetail);
 	}
 
 	private renderGlobalQueueCard(containerEl: HTMLElement, visibleProjects: ProjectSummary[]): void {
@@ -520,8 +528,9 @@ class TavernView extends ItemView {
 		meta.createSpan({ cls: 'tavern-meta-item', text: `${openTaskCount} open` });
 
 		this.registerDomEvent(card, 'click', () => {
+			const animateDetail = this.boardPage !== 'global';
 			this.boardPage = 'global';
-			this.renderShell();
+			this.renderShell(animateDetail);
 		});
 	}
 
@@ -538,12 +547,13 @@ class TavernView extends ItemView {
 		this.renderProjectMeta(card, openTaskCount);
 
 		this.registerDomEvent(card, 'click', () => {
+			const animateDetail = this.boardPage !== 'project' || this.selectedPath !== project.path;
 			this.boardPage = 'project';
 			if (this.selectedPath !== project.path) {
 				this.projectQuery = '';
 			}
 			this.selectedPath = project.path;
-			this.renderShell();
+			this.renderShell(animateDetail);
 		});
 	}
 
@@ -842,14 +852,9 @@ class TavernView extends ItemView {
 		if (task.checked) {
 			taskEl.addClass('is-done');
 		}
-		taskEl.draggable = true;
-		this.registerDomEvent(taskEl, 'dragstart', (event) => {
-			taskEl.addClass('is-dragging-task');
+		this.renderTaskDragHandle(taskEl, task.text, (event) => {
 			event.dataTransfer?.setData(TASK_ID_MIME, task.id);
 			event.dataTransfer?.setData(TASK_QUEUE_KEY_MIME, taskSelectionKey(boardTask));
-		});
-		this.registerDomEvent(taskEl, 'dragend', () => {
-			taskEl.removeClass('is-dragging-task');
 		});
 		this.registerDomEvent(taskEl, 'dragover', (event) => {
 			this.markTaskDropTarget(event, taskEl);
@@ -899,13 +904,8 @@ class TavernView extends ItemView {
 		if (task.checked) {
 			row.addClass('is-done');
 		}
-		row.draggable = true;
-		this.registerDomEvent(row, 'dragstart', (event) => {
-			row.addClass('is-dragging-task');
+		this.renderTaskDragHandle(row, task.text, (event) => {
 			event.dataTransfer?.setData(TASK_QUEUE_KEY_MIME, taskSelectionKey(task));
-		});
-		this.registerDomEvent(row, 'dragend', () => {
-			row.removeClass('is-dragging-task');
 		});
 		this.registerDomEvent(row, 'contextmenu', (event) => {
 			this.showTaskContextMenu(event, task);
@@ -934,6 +934,27 @@ class TavernView extends ItemView {
 		if (depth > 0) {
 			containerEl.addClass('is-nested');
 		}
+	}
+
+	private renderTaskDragHandle(
+		row: HTMLElement,
+		taskText: string,
+		onDragStart: (event: DragEvent) => void,
+	): void {
+		const handle = row.createEl('button', {
+			attr: { 'aria-label': `Drag ${taskText}`, title: 'Drag to move' },
+			cls: 'tavern-task-drag-handle',
+		});
+		handle.draggable = true;
+		setIcon(handle, 'grip-vertical');
+		this.registerDomEvent(handle, 'click', (event) => event.stopPropagation());
+		this.registerDomEvent(handle, 'dragstart', (event) => {
+			row.addClass('is-dragging-task');
+			onDragStart(event);
+		});
+		this.registerDomEvent(handle, 'dragend', () => {
+			row.removeClass('is-dragging-task');
+		});
 	}
 
 	private taskNestingDepth(task: ProjectTask): number {
@@ -982,6 +1003,7 @@ class TavernView extends ItemView {
 		const label = containerEl.createEl('span', {
 			attr: {
 				'aria-label': `Edit ${labelText}`,
+				title: 'Click to edit task',
 				tabindex: '0',
 			},
 			cls: 'tavern-project-task-text tavern-editable-task-text',
@@ -994,7 +1016,7 @@ class TavernView extends ItemView {
 			this.renderTaskTextEditor(label, task, text);
 		};
 
-		this.registerDomEvent(label, 'dblclick', openEditor);
+		this.registerDomEvent(label, 'click', openEditor);
 		this.registerDomEvent(label, 'keydown', (event) => {
 			if (event.key === 'Enter') {
 				openEditor(event);
@@ -1023,8 +1045,6 @@ class TavernView extends ItemView {
 					text: unescapeInlineMarkdownText(segment.text),
 				});
 				link.addEventListener('click', (event) => event.stopPropagation());
-				link.addEventListener('dblclick', (event) => event.stopPropagation());
-				link.addEventListener('dragstart', (event) => event.stopPropagation());
 			}
 		}
 	}
@@ -1065,8 +1085,6 @@ class TavernView extends ItemView {
 		};
 
 		this.registerDomEvent(input, 'click', (event) => event.stopPropagation());
-		this.registerDomEvent(input, 'dblclick', (event) => event.stopPropagation());
-		this.registerDomEvent(input, 'dragstart', (event) => event.stopPropagation());
 		this.registerDomEvent(input, 'keydown', (event) => {
 			event.stopPropagation();
 			if (event.key === 'Enter') {
@@ -1079,6 +1097,7 @@ class TavernView extends ItemView {
 			}
 		});
 		this.registerDomEvent(input, 'blur', save);
+		input.focus();
 	}
 
 	private showTaskContextMenu(event: MouseEvent, task: ProjectBoardTask | undefined): void {
@@ -1337,14 +1356,8 @@ class TavernView extends ItemView {
 			if (task.checked) {
 				row.addClass('is-done');
 			}
-			row.draggable = true;
-			this.registerDomEvent(row, 'dragstart', (event) => {
-				row.addClass('is-dragging-task');
+			this.renderTaskDragHandle(row, task.text, (event) => {
 				event.dataTransfer?.setData(QUEUE_KEY_MIME, taskSelectionKey(task));
-			});
-			this.registerDomEvent(row, 'dragend', () => {
-				/* c8 ignore next -- dragend cleanup handler on focus row (dispatched in tests; branch instrumentation listed) */
-				row.removeClass('is-dragging-task');
 			});
 			this.registerDomEvent(row, 'dragover', (event) => {
 				this.markReorderTarget(event, row);
@@ -1517,7 +1530,9 @@ class TavernView extends ItemView {
 		if (relativeY >= rect.height * (1 - TASK_DROP_EDGE_RATIO)) {
 			return 'after';
 		}
-		if (event.clientX - rect.left >= NEST_TASK_OFFSET) {
+		const depth = Number(target.style.getPropertyValue('--tavern-task-depth')) || 0;
+		const nestOffset = NEST_TASK_OFFSET + Math.min(depth * 24, 192);
+		if (event.clientX - rect.left >= nestOffset) {
 			return 'child';
 		}
 

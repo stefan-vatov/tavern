@@ -15,6 +15,10 @@
 	--tavern-text-muted: rgba(255, 255, 255, 0.58);
 	--tavern-text-faint: rgba(255, 255, 255, 0.34);
 	--tavern-accent: var(--interactive-accent);
+	--tavern-motion-fast: 120ms;
+	--tavern-motion-base: 160ms;
+	--tavern-motion-navigation: 180ms;
+	--tavern-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 .workspace-leaf-content[data-type='tavern-view'] .view-header {
@@ -57,12 +61,27 @@
 	overflow: hidden;
 }
 
+.tavern-panel-detail.is-entering.tavern-detail {
+	animation: tavern-detail-enter var(--tavern-motion-navigation) var(--tavern-ease-out) both;
+}
+
+@keyframes tavern-detail-enter {
+	from {
+		opacity: 0.72;
+		transform: translateY(5px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
 /* Resize handles */
 .tavern-resize-handle {
 	width: 6px;
 	background: transparent;
 	cursor: col-resize;
-	transition: background 0.15s;
+	transition: background-color var(--tavern-motion-base) var(--tavern-ease-out);
 	z-index: 1;
 }
 
@@ -93,6 +112,10 @@
 	caret-color: var(--tavern-text);
 	font-size: var(--font-ui-small);
 	outline: none;
+	transition:
+		background-color var(--tavern-motion-base) var(--tavern-ease-out),
+		border-color var(--tavern-motion-base) var(--tavern-ease-out),
+		box-shadow var(--tavern-motion-base) var(--tavern-ease-out);
 }
 
 .tavern-search-input:focus {
@@ -147,7 +170,7 @@
 }
 
 .tavern-search-task {
-	grid-template-columns: 18px minmax(0, 1fr) auto;
+	grid-template-columns: 18px 18px minmax(0, 1fr) auto;
 	margin-left: calc(var(--tavern-task-depth, 0) * 18px);
 	padding: 8px 10px;
 	border-left: 1px solid transparent;
@@ -193,6 +216,7 @@
 	padding: 0 8px 5px;
 	color: var(--tavern-text-faint);
 	cursor: pointer;
+	transition: color var(--tavern-motion-base) var(--tavern-ease-out);
 }
 
 .tavern-sidebar-section-header:hover {
@@ -234,9 +258,20 @@
 	margin-bottom: 4px;
 	position: relative;
 	transition:
-		background 0.12s ease,
-		border-color 0.12s ease,
-		box-shadow 0.12s ease;
+		background-color var(--tavern-motion-base) var(--tavern-ease-out),
+		border-color var(--tavern-motion-base) var(--tavern-ease-out),
+		box-shadow var(--tavern-motion-base) var(--tavern-ease-out),
+		transform var(--tavern-motion-base) var(--tavern-ease-out);
+}
+
+@media (hover: hover) and (pointer: fine) {
+	.tavern-skill-card:hover {
+		transform: translateY(-1px);
+	}
+
+	.tavern-skill-card:active {
+		transform: translateY(0) scale(0.99);
+	}
 }
 
 .tavern-skill-card:hover {
@@ -355,6 +390,11 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
+	transition:
+		background-color var(--tavern-motion-fast) var(--tavern-ease-out),
+		border-color var(--tavern-motion-fast) var(--tavern-ease-out),
+		color var(--tavern-motion-fast) var(--tavern-ease-out),
+		transform var(--tavern-motion-fast) var(--tavern-ease-out);
 }
 
 .tavern-toolbar-btn:hover {
@@ -2340,9 +2380,9 @@
 	border-top: 1px solid var(--tavern-border-soft);
 	padding: 12px 0 14px;
 	transition:
-		background 0.12s ease,
-		border-color 0.12s ease,
-		padding 0.12s ease;
+		background-color var(--tavern-motion-base) var(--tavern-ease-out),
+		border-color var(--tavern-motion-base) var(--tavern-ease-out),
+		box-shadow var(--tavern-motion-base) var(--tavern-ease-out);
 }
 
 .tavern-project-section:first-child {
@@ -2393,6 +2433,11 @@
 	color: var(--tavern-text-muted);
 	cursor: pointer;
 	flex-shrink: 0;
+	transition:
+		background-color var(--tavern-motion-fast) var(--tavern-ease-out),
+		border-color var(--tavern-motion-fast) var(--tavern-ease-out),
+		color var(--tavern-motion-fast) var(--tavern-ease-out),
+		transform var(--tavern-motion-fast) var(--tavern-ease-out);
 }
 
 .tavern-project-section-toggle:hover {
@@ -2432,7 +2477,7 @@
 .tavern-project-task {
 	--tavern-task-depth: 0;
 	display: grid;
-	grid-template-columns: 18px minmax(0, 1fr) auto auto;
+	grid-template-columns: 18px 18px minmax(0, 1fr) auto auto;
 	gap: 9px;
 	align-items: center;
 	border: 1px solid transparent;
@@ -2440,13 +2485,13 @@
 	border-radius: 0;
 	background: transparent;
 	padding: 6px 8px 6px calc(8px + min(var(--tavern-task-depth) * 24px, 192px));
-	cursor: grab;
+	cursor: default;
 	position: relative;
 	transition:
-		background 0.12s ease,
-		opacity 0.12s ease,
-		border-color 0.12s ease,
-		box-shadow 0.12s ease;
+		background-color var(--tavern-motion-fast) var(--tavern-ease-out),
+		opacity var(--tavern-motion-fast) var(--tavern-ease-out),
+		border-color var(--tavern-motion-fast) var(--tavern-ease-out),
+		box-shadow var(--tavern-motion-fast) var(--tavern-ease-out);
 }
 
 .tavern-project-task.is-in-global-queue {
@@ -2529,18 +2574,79 @@
 }
 
 .tavern-project-task.is-drop-child::after {
+	opacity: 1;
+	transform: scaleX(1);
+}
+
+.tavern-project-task::after {
 	content: '';
 	position: absolute;
 	right: 8px;
 	bottom: 2px;
-	left: calc(32px + min(var(--tavern-task-depth) * 24px, 192px));
+	left: calc(59px + min(var(--tavern-task-depth) * 24px, 192px));
 	height: 2px;
 	border-radius: 999px;
 	background: var(--interactive-accent);
+	opacity: 0;
+	transform: scaleX(0.94);
+	transform-origin: left center;
+	transition:
+		opacity var(--tavern-motion-fast) var(--tavern-ease-out),
+		transform var(--tavern-motion-fast) var(--tavern-ease-out);
+	pointer-events: none;
 }
 
-.tavern-project-task:active {
+.tavern-task-drag-handle {
+	width: 18px;
+	height: 24px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--text-muted);
+	opacity: 0;
+	transform: translateX(-3px);
+	cursor: grab;
+	transition:
+		color var(--tavern-motion-fast) var(--tavern-ease-out),
+		opacity var(--tavern-motion-fast) var(--tavern-ease-out),
+		transform var(--tavern-motion-fast) var(--tavern-ease-out);
+}
+
+.tavern-task-drag-handle:focus-visible,
+.tavern-project-task:focus-within .tavern-task-drag-handle,
+.tavern-focus-task:focus-within .tavern-task-drag-handle {
+	color: var(--text-normal);
+	opacity: 1;
+	transform: translateX(0);
+}
+
+@media (hover: hover) and (pointer: fine) {
+	.tavern-task-drag-handle:hover,
+	.tavern-project-task:hover .tavern-task-drag-handle,
+	.tavern-focus-task:hover .tavern-task-drag-handle {
+		color: var(--text-normal);
+		opacity: 1;
+		transform: translateX(0);
+	}
+}
+
+.tavern-task-drag-handle:active {
 	cursor: grabbing;
+}
+
+.tavern-task-drag-handle svg {
+	width: 14px;
+	height: 14px;
+}
+
+@media (hover: none), (pointer: coarse) {
+	.tavern-task-drag-handle {
+		opacity: 0.72;
+		transform: none;
+	}
 }
 
 .tavern-project-task input {
@@ -2560,6 +2666,9 @@
 	border-radius: var(--radius-s);
 	cursor: text;
 	min-width: 0;
+	transition:
+		background-color var(--tavern-motion-fast) var(--tavern-ease-out),
+		color var(--tavern-motion-fast) var(--tavern-ease-out);
 }
 
 .tavern-editable-task-text:hover {
@@ -2567,10 +2676,16 @@
 	background: color-mix(in srgb, var(--background-modifier-hover) 65%, transparent);
 }
 
+.tavern-editable-task-text:focus-visible {
+	outline: 1px solid var(--background-modifier-border-hover);
+	outline-offset: 2px;
+}
+
 .tavern-task-link {
 	color: var(--text-accent);
 	text-decoration: none;
 	text-underline-offset: 2px;
+	transition: color var(--tavern-motion-fast) var(--tavern-ease-out);
 }
 
 .tavern-task-link:hover {
@@ -2609,8 +2724,10 @@
 	color: var(--text-muted);
 	cursor: pointer;
 	transition:
-		background 0.12s ease,
-		border-color 0.12s ease;
+		background-color var(--tavern-motion-fast) var(--tavern-ease-out),
+		border-color var(--tavern-motion-fast) var(--tavern-ease-out),
+		color var(--tavern-motion-fast) var(--tavern-ease-out),
+		transform var(--tavern-motion-fast) var(--tavern-ease-out);
 }
 
 .tavern-project-task-pin.is-selected {
@@ -2658,12 +2775,17 @@
 	display: inline-flex;
 	gap: 2px;
 	opacity: 0;
-	transition: opacity 0.12s ease;
+	transition: opacity var(--tavern-motion-fast) var(--tavern-ease-out);
 }
 
-.tavern-project-task:hover .tavern-project-task-reorder,
 .tavern-project-task:focus-within .tavern-project-task-reorder {
 	opacity: 1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+	.tavern-project-task:hover .tavern-project-task-reorder {
+		opacity: 1;
+	}
 }
 
 .tavern-project-task-reorder-btn {
@@ -2678,6 +2800,11 @@
 	color: var(--text-muted);
 	cursor: pointer;
 	opacity: 0.72;
+	transition:
+		background-color var(--tavern-motion-fast) var(--tavern-ease-out),
+		border-color var(--tavern-motion-fast) var(--tavern-ease-out),
+		color var(--tavern-motion-fast) var(--tavern-ease-out),
+		transform var(--tavern-motion-fast) var(--tavern-ease-out);
 }
 
 .tavern-project-task-reorder-btn:hover {
@@ -2699,12 +2826,17 @@
 	margin-top: 8px;
 	padding: 0 8px;
 	opacity: 0.72;
-	transition: opacity 0.12s ease;
+	transition: opacity var(--tavern-motion-fast) var(--tavern-ease-out);
 }
 
-.tavern-project-section:hover .tavern-add-task,
 .tavern-add-task:focus-within {
 	opacity: 1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+	.tavern-project-section:hover .tavern-add-task {
+		opacity: 1;
+	}
 }
 
 .tavern-add-task-input {
@@ -2718,6 +2850,10 @@
 	color: var(--tavern-text);
 	font-size: var(--font-ui-small);
 	outline: none;
+	transition:
+		background-color var(--tavern-motion-base) var(--tavern-ease-out),
+		border-color var(--tavern-motion-base) var(--tavern-ease-out),
+		box-shadow var(--tavern-motion-base) var(--tavern-ease-out);
 }
 
 .tavern-add-task-input:focus {
@@ -2737,6 +2873,12 @@
 	color: var(--text-muted);
 	cursor: pointer;
 	opacity: 0.68;
+	transition:
+		background-color var(--tavern-motion-fast) var(--tavern-ease-out),
+		border-color var(--tavern-motion-fast) var(--tavern-ease-out),
+		color var(--tavern-motion-fast) var(--tavern-ease-out),
+		opacity var(--tavern-motion-fast) var(--tavern-ease-out),
+		transform var(--tavern-motion-fast) var(--tavern-ease-out);
 }
 
 .tavern-add-task-button:hover {
@@ -2772,8 +2914,9 @@
 	min-height: 148px;
 	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
 	transition:
-		background 0.12s ease,
-		border-color 0.12s ease;
+		background-color var(--tavern-motion-base) var(--tavern-ease-out),
+		border-color var(--tavern-motion-base) var(--tavern-ease-out),
+		box-shadow var(--tavern-motion-base) var(--tavern-ease-out);
 }
 
 .tavern-focus-queue.is-drop-target {
@@ -2807,17 +2950,22 @@
 .tavern-focus-task {
 	--tavern-task-depth: 0;
 	display: grid;
-	grid-template-columns: 18px minmax(0, 1fr) minmax(100px, 0.22fr) auto;
+	grid-template-columns: 18px 18px minmax(0, 1fr) minmax(100px, 0.22fr) auto;
 	gap: 10px;
 	align-items: center;
 	border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
 	padding: 9px 0 9px min(var(--tavern-task-depth) * 24px, 192px);
-	cursor: grab;
+	cursor: default;
 	position: relative;
 	transition:
-		background 0.12s ease,
-		border-color 0.12s ease,
-		box-shadow 0.12s ease;
+		background-color var(--tavern-motion-fast) var(--tavern-ease-out),
+		border-color var(--tavern-motion-fast) var(--tavern-ease-out),
+		box-shadow var(--tavern-motion-fast) var(--tavern-ease-out),
+		opacity var(--tavern-motion-fast) var(--tavern-ease-out);
+}
+
+.tavern-focus-task.is-dragging-task {
+	opacity: 0.45;
 }
 
 .tavern-focus-task:hover {
@@ -2829,10 +2977,6 @@
 	border-top-color: var(--interactive-accent);
 	box-shadow: inset 0 2px 0 var(--interactive-accent);
 	background: var(--background-modifier-hover);
-}
-
-.tavern-focus-task:active {
-	cursor: grabbing;
 }
 
 .tavern-focus-task-project {
@@ -2849,8 +2993,47 @@
 }
 
 .tavern-global-task {
-	grid-template-columns: 18px minmax(0, 1fr) auto;
+	grid-template-columns: 18px 18px minmax(0, 1fr) auto;
 	cursor: default;
+}
+
+.tavern-container button:not(.tavern-task-drag-handle) {
+	transition:
+		background-color var(--tavern-motion-fast) var(--tavern-ease-out),
+		border-color var(--tavern-motion-fast) var(--tavern-ease-out),
+		color var(--tavern-motion-fast) var(--tavern-ease-out),
+		opacity var(--tavern-motion-fast) var(--tavern-ease-out),
+		transform var(--tavern-motion-fast) var(--tavern-ease-out);
+}
+
+@media (hover: hover) and (pointer: fine) {
+	.tavern-container button:not(.tavern-task-drag-handle):active {
+		transform: scale(0.97);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.tavern-panel-detail.is-entering.tavern-detail {
+		animation-name: tavern-detail-fade-in;
+		animation-duration: 120ms;
+	}
+
+	@keyframes tavern-detail-fade-in {
+		from {
+			opacity: 0.72;
+		}
+		to {
+			opacity: 1;
+		}
+	}
+
+	.tavern-skill-card:hover,
+	.tavern-skill-card:active,
+	.tavern-container button:not(.tavern-task-drag-handle):active,
+	.tavern-task-drag-handle,
+	.tavern-project-task::after {
+		transform: none;
+	}
 }
 
 .tavern-global-task-content {

@@ -256,6 +256,15 @@ app shell, use this checklist:
 - Open Tavern repeatedly and concurrently: one app window remains.
 - Navigate Launch → global queue → Studio without opening another app window.
 - Queue a task and return to the global queue: the selection is present.
+- Drag a task by its handle from the project, available-task, search-result, and
+  focus-queue lists. Verify dragging from the row text does not start a move.
+- Click task text to open inline editing; Enter saves and Escape cancels. Confirm
+  task links remain clickable, and clicking elsewhere on a search result opens
+  its source project.
+- Switch between a project and the global queue; confirm the detail transition
+  plays on navigation while search filtering stays immediate. With reduced
+  motion enabled, confirm the panel fades without sliding and controls do not
+  move when pressed.
 - Search for `Arrange`: Studio's task appears; unrelated tasks do not. Escape
   dismisses the search overlay in the popout.
 - Drag the sidebar divider: the sidebar follows the pointer in that window.
