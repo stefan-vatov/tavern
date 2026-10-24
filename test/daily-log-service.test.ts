@@ -201,9 +201,17 @@ describe('linked daily log tasks', () => {
 			(task) => task.text === 'Local',
 		)!;
 		await state.service.setTaskChecked(day, local.id, true);
+		expect(
+			(await state.service.read(day)).note!.tasks.find((task) => task.id === local.id),
+		).toMatchObject({ text: 'Local', checked: true });
 		expect(state.tasks().find((task) => task.blockId === linkedSource.blockId)!.checked).toBe(
 			false,
 		);
+		state.vault.files.delete(sourcePath);
+		await state.service.setTaskChecked(day, local.id, false);
+		expect(
+			(await state.service.read(day)).note!.tasks.find((task) => task.id === local.id),
+		).toMatchObject({ text: 'Local', checked: false });
 	});
 
 	it('retains unresolved links and rejects missing or duplicated blocks before changing another endpoint', async () => {

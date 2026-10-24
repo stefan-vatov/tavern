@@ -40,7 +40,9 @@ carry the task's nested tree.
 ## Copies and stable references
 
 Dragging a task from the global or focus queue into the daily log copies its
-task tree. The project source remains in place. Each copied task has its own
+task tree. A queue-to-log drag starts from a top-level task; a nested queue
+task cannot be copied separately. A parent carries its entire nested group.
+The project source remains in place. Each copied task has its own
 standard Obsidian block ID, and each source task receives an ID if it does not
 already have one. A plugin-owned registry relates source and copy endpoints
 by note path and block ID. Copying an already linked task retains its source
@@ -52,6 +54,14 @@ Task text is independently editable in each note; only checkbox state is
 synchronized. Markdown remains usable without Tavern.
 
 ## Checkbox synchronization and failures
+
+Standalone daily tasks remain editable and checkable without a project or queue
+entry. Their checkbox changes write only to the daily note. Only registered task
+links invoke cross-note synchronization.
+
+Checkbox updates must not blank or flash the log or replace it with a loading
+state while notes and project queues refresh. Preserve the selected day, filter,
+scroll position, and unfinished task entry during checkbox updates.
 
 Checking or unchecking a linked source or copy propagates the same state to
 its source and all registered copies. This applies to Tavern actions and

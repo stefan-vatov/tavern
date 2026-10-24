@@ -13,7 +13,7 @@ import {
 	type ProjectLibrary,
 	type ProjectSummary,
 } from './project-library';
-import type { ProjectTask } from './project-note';
+import { indentWidth, type ProjectTask } from './project-note';
 import {
 	addVaultProjectTask,
 	completeVaultProjectTask,
@@ -38,6 +38,7 @@ const DONE_SECTION_NAME = 'Done';
 const TASK_ID_MIME = 'text/plain';
 const TASK_QUEUE_KEY_MIME = 'application/x-tavern-task-key';
 const QUEUE_KEY_MIME = 'application/x-tavern-queue-key';
+const DAILY_SOURCE_MIME = 'application/x-tavern-daily-source';
 const NEST_TASK_OFFSET = 63;
 const TASK_DROP_EDGE_RATIO = 0.33;
 
@@ -79,6 +80,9 @@ type TavernBoardPage = 'global' | 'project';
 
 class TavernView extends ItemView {
 	private dailyPane: DailyLogPane | undefined;
+	private listEl: HTMLElement | undefined;
+	private detailEl: HTMLElement | undefined;
+	private refreshRevision = 0;
 	private dailyDay: string;
 	private dailyQuery = '';
 	private dragCleanup: (() => void) | null = null;
@@ -142,6 +146,9 @@ class TavernView extends ItemView {
 			this.removeChild(this.dailyPane);
 			this.dailyPane = undefined;
 		}
+		this.listEl = undefined;
+		this.detailEl = undefined;
+		this.refreshRevision += 1;
 		this.popSearchOverlayScope();
 		this.dragCleanup?.();
 		this.dragCleanup = null;
@@ -207,13 +214,16 @@ class TavernView extends ItemView {
 		if (this.closed) {
 			return;
 		}
-		this.loading = true;
+		const revision = ++this.refreshRevision;
 		this.errorMessage = null;
-		this.renderShell();
 
 		const exit = await Effect.runPromiseExit(
 			loadVaultProjectLibrary(this.deps.vault, this.deps.settings.projectFolders),
 		);
+
+		if (this.closed || revision !== this.refreshRevision) {
+			return;
+		}
 
 		if (Exit.isFailure(exit)) {
 			this.library = EMPTY_LIBRARY;
@@ -243,6 +253,10 @@ class TavernView extends ItemView {
 			await this.updateBoardTaskKeys(prunedBoardTaskKeys);
 		}
 
+		if (this.closed || revision !== this.refreshRevision) {
+			return;
+		}
+
 		// only override selectedPath if current is absent/invalid in fresh library (preserve setState/UI selections; reconcile external delete only)
 		if (this.boardPage === 'project') {
 			if (
@@ -263,21 +277,20 @@ class TavernView extends ItemView {
 			return;
 		}
 		this.dragCleanup?.();
-		if (this.dailyPane) {
-			this.removeChild(this.dailyPane);
-			this.dailyPane = undefined;
+		if (!this.listEl || !this.detailEl) {
+			this.contentEl.empty();
+			this.listEl = this.contentEl.createDiv('tavern-panel tavern-panel-list');
+			this.createResizeHandle(this.contentEl, this.listEl, LIST_RESIZE);
+			this.detailEl = this.contentEl.createDiv('tavern-panel tavern-panel-detail');
 		}
-		this.contentEl.empty();
 		this.contentEl.addClass('tavern-container');
 		this.contentEl.removeClass('is-sidebar-open');
 		if (this.sidebarOpen) {
 			this.contentEl.addClass('is-sidebar-open');
 		}
 
-		const listEl = this.contentEl.createDiv('tavern-panel tavern-panel-list');
-		this.createResizeHandle(this.contentEl, listEl, LIST_RESIZE);
-
-		const detailEl = this.contentEl.createDiv('tavern-panel tavern-panel-detail');
+		const { listEl, detailEl } = this;
+		detailEl.removeClass('is-entering');
 		if (animateDetail) {
 			detailEl.addClass('is-entering');
 		}
@@ -287,7 +300,11 @@ class TavernView extends ItemView {
 		});
 		this.renderDetail(detailEl);
 		if (this.deps.dailyLogs) {
-			this.renderDailyLog();
+			if (!this.dailyPane) {
+				this.renderDailyLog();
+			} else {
+				void this.dailyPane.refresh();
+			}
 		}
 	}
 
@@ -308,10 +325,7 @@ class TavernView extends ItemView {
 				},
 				onChanged: () => this.refreshProjects(),
 				projectTaskFromDrop: (event) => {
-					const key =
-						event.dataTransfer?.getData(TASK_QUEUE_KEY_MIME) ||
-						event.dataTransfer?.getData(QUEUE_KEY_MIME) ||
-						'';
+					const key = event.dataTransfer?.getData(DAILY_SOURCE_MIME) ?? '';
 					return this.taskFromSelectionKey(key);
 				},
 				renderTaskText: (container, text, onSave) => {
@@ -554,6 +568,7 @@ class TavernView extends ItemView {
 		this.renderTaskDragHandle(row, task.text, (event) => {
 			event.dataTransfer?.setData(TASK_ID_MIME, task.id);
 			event.dataTransfer?.setData(TASK_QUEUE_KEY_MIME, taskSelectionKey(task));
+			this.setDailySource(event, task);
 		});
 		if (this.isTaskSelected(task)) {
 			row.addClass('is-in-global-queue');
@@ -968,6 +983,7 @@ class TavernView extends ItemView {
 		this.renderTaskDragHandle(taskEl, task.text, (event) => {
 			event.dataTransfer?.setData(TASK_ID_MIME, task.id);
 			event.dataTransfer?.setData(TASK_QUEUE_KEY_MIME, taskSelectionKey(boardTask));
+			event.dataTransfer?.setData(DAILY_SOURCE_MIME, taskSelectionKey(boardTask));
 		});
 		this.registerDomEvent(taskEl, 'dragover', (event) => {
 			this.markTaskDropTarget(event, taskEl);
@@ -1026,6 +1042,7 @@ class TavernView extends ItemView {
 		}
 		this.renderTaskDragHandle(row, task.text, (event) => {
 			event.dataTransfer?.setData(TASK_QUEUE_KEY_MIME, taskSelectionKey(task));
+			this.setDailySource(event, task);
 		});
 		this.registerDomEvent(row, 'contextmenu', (event) => {
 			this.showTaskContextMenu(event, task);
@@ -1070,11 +1087,20 @@ class TavernView extends ItemView {
 		this.registerDomEvent(handle, 'click', (event) => event.stopPropagation());
 		this.registerDomEvent(handle, 'dragstart', (event) => {
 			row.addClass('is-dragging-task');
+			if (event.dataTransfer) {
+				event.dataTransfer.effectAllowed = 'copyMove';
+			}
 			onDragStart(event);
 		});
 		this.registerDomEvent(handle, 'dragend', () => {
 			row.removeClass('is-dragging-task');
 		});
+	}
+
+	private setDailySource(event: DragEvent, task: ProjectBoardTask): void {
+		if (indentWidth(task.indent) === 0) {
+			event.dataTransfer?.setData(DAILY_SOURCE_MIME, taskSelectionKey(task));
+		}
 	}
 
 	private taskNestingDepth(task: ProjectTask): number {
@@ -1181,6 +1207,12 @@ class TavernView extends ItemView {
 			value: text,
 		});
 		let committed = false;
+		const restoreLabel = () => {
+			containerEl.empty();
+			containerEl.removeClass('is-editing');
+			this.renderInlineTaskMarkdown(containerEl, text || 'Untitled task');
+			containerEl.focus();
+		};
 
 		const save = () => {
 			if (committed) {
@@ -1189,6 +1221,7 @@ class TavernView extends ItemView {
 			committed = true;
 			const nextText = input.value.trim();
 			if (nextText.length === 0 || nextText === text.trim()) {
+				restoreLabel();
 				void this.refreshProjects();
 				return;
 			}
@@ -1203,6 +1236,7 @@ class TavernView extends ItemView {
 				return;
 			}
 			committed = true;
+			restoreLabel();
 			void this.refreshProjects();
 		};
 
@@ -1518,6 +1552,7 @@ class TavernView extends ItemView {
 			}
 			this.renderTaskDragHandle(row, task.text, (event) => {
 				event.dataTransfer?.setData(QUEUE_KEY_MIME, taskSelectionKey(task));
+				this.setDailySource(event, task);
 			});
 			this.registerDomEvent(row, 'dragover', (event) => {
 				this.markReorderTarget(event, row);

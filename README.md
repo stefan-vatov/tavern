@@ -57,10 +57,13 @@ Daily notes live at `02_Daily_Log/Daily_Log/YYYY/MM/YYYY-MM-DD.md` by default.
 Change the base folder in Tavern settings. **Create daily log** makes a plain
 Markdown note with `General`, `Plan`, and `Notes` headings. Existing notes keep
 their content. You can search, edit, check, add, reorder, and nest tasks in the
-log.
+log. Tasks written directly in a daily note can be checked and unchecked without
+belonging to a project or queue. Checking a task keeps the log and unfinished
+entries in place while the queues update.
 
 Drag a task's handle from the global or focus queue into the daily log to copy
-it, including its nested tasks. The source stays in its project. Tavern adds
+it, including its nested tasks. Drag a parent to copy its whole group; nested
+queue tasks cannot be dragged into the log separately. The source stays in its project. Tavern adds
 standard Obsidian block IDs, such as `^tavern-a1b2`, to the linked task lines and
 saves their relationships in plugin settings. Checking or unchecking either
 copy updates the corresponding task in the other note, including changes made

@@ -23,6 +23,7 @@ interface DailyLogPaneOptions {
 }
 
 const DAILY_TASK_MIME = 'application/x-tavern-daily-task';
+const DAILY_SOURCE_MIME = 'application/x-tavern-daily-source';
 
 class DailyLogPane extends Component {
 	private day: string;
@@ -30,6 +31,9 @@ class DailyLogPane extends Component {
 	private active = true;
 	private revision = 0;
 	private note: DailyNote | null = null;
+	private renderedLayout = '';
+	private readonly taskRows = new Map<string, { row: HTMLElement; checkbox: HTMLInputElement }>();
+	private contentEvents: Component;
 	private readonly header: HTMLElement;
 	private readonly content: HTMLElement;
 
@@ -39,6 +43,7 @@ class DailyLogPane extends Component {
 		private readonly options: DailyLogPaneOptions,
 	) {
 		super();
+		this.contentEvents = this.addChild(new Component());
 		this.day = options.day;
 		this.query = options.query;
 		container.addClass('tavern-daily-panel');
@@ -57,7 +62,7 @@ class DailyLogPane extends Component {
 		});
 		this.content = container.createDiv('tavern-daily-content');
 		this.renderHeader();
-		this.registerDrop(this.content);
+		this.registerDrop(this.content, undefined, this);
 		this.register(() => {
 			this.active = false;
 			this.revision += 1;
@@ -123,6 +128,7 @@ class DailyLogPane extends Component {
 		this.publishState();
 		this.renderHeader();
 		this.content.empty();
+		this.renderedLayout = '';
 		await this.refresh();
 	}
 
@@ -130,6 +136,25 @@ class DailyLogPane extends Component {
 		if (!this.active) {
 			return;
 		}
+		const layout = JSON.stringify({
+			query: this.query,
+			items: this.note?.items.map((item) => {
+				if (item.type === 'task') {
+					return { ...item, task: { ...item.task, checked: false } };
+				}
+				return item;
+			}),
+		});
+		if (layout === this.renderedLayout) {
+			for (const task of this.note?.tasks ?? []) {
+				this.updateTaskChecked(task);
+			}
+			return;
+		}
+		this.renderedLayout = layout;
+		this.taskRows.clear();
+		this.removeChild(this.contentEvents);
+		this.contentEvents = this.addChild(new Component());
 		this.content.empty();
 		if (!this.note) {
 			this.content.createEl('p', { cls: 'tavern-daily-empty', text: 'No note' });
@@ -137,7 +162,7 @@ class DailyLogPane extends Component {
 				cls: 'tavern-daily-create',
 				text: 'Create daily log',
 			});
-			this.registerDomEvent(
+			this.contentEvents.registerDomEvent(
 				create,
 				'click',
 				() => void this.mutate(() => this.controller.create(this.day)),
@@ -180,7 +205,7 @@ class DailyLogPane extends Component {
 			cls: 'tavern-add-task-input',
 			attr: { placeholder: 'Add a todo...', 'aria-label': 'Add todo' },
 		});
-		this.registerDomEvent(input, 'keydown', async (event) => {
+		this.contentEvents.registerDomEvent(input, 'keydown', async (event) => {
 			if (event.key !== 'Enter' || !input.value.trim() || event.isComposing) {
 				return;
 			}
@@ -208,8 +233,8 @@ class DailyLogPane extends Component {
 		});
 		handle.draggable = true;
 		setIcon(handle, 'grip-vertical');
-		this.registerDomEvent(handle, 'click', (event) => event.stopPropagation());
-		this.registerDomEvent(handle, 'dragstart', (event) => {
+		this.contentEvents.registerDomEvent(handle, 'click', (event) => event.stopPropagation());
+		this.contentEvents.registerDomEvent(handle, 'dragstart', (event) => {
 			event.stopPropagation();
 			event.dataTransfer?.setData(
 				DAILY_TASK_MIME,
@@ -220,7 +245,9 @@ class DailyLogPane extends Component {
 			}
 			row.addClass('is-dragging-task');
 		});
-		this.registerDomEvent(handle, 'dragend', () => row.removeClass('is-dragging-task'));
+		this.contentEvents.registerDomEvent(handle, 'dragend', () =>
+			row.removeClass('is-dragging-task'),
+		);
 		const checkbox = row.createEl('input', {
 			type: 'checkbox',
 			attr: {
@@ -228,7 +255,8 @@ class DailyLogPane extends Component {
 			},
 		});
 		checkbox.checked = task.checked;
-		this.registerDomEvent(
+		this.taskRows.set(task.id, { row, checkbox });
+		this.contentEvents.registerDomEvent(
 			checkbox,
 			'change',
 			() =>
@@ -241,8 +269,29 @@ class DailyLogPane extends Component {
 		this.registerDrop(row, task.id);
 	}
 
-	private registerDrop(element: HTMLElement, taskId?: string): void {
-		this.registerDomEvent(element, 'dragover', (event) => {
+	private updateTaskChecked(task: DailyTask): void {
+		const rendered = this.taskRows.get(task.id);
+		if (!rendered) {
+			return;
+		}
+		rendered.checkbox.checked = task.checked;
+		rendered.checkbox.setAttribute(
+			'aria-label',
+			`Mark ${task.text} ${task.checked ? 'incomplete' : 'complete'}`,
+		);
+		if (task.checked) {
+			rendered.row.addClass('is-done');
+		} else {
+			rendered.row.removeClass('is-done');
+		}
+	}
+
+	private registerDrop(
+		element: HTMLElement,
+		taskId?: string,
+		events: Component = this.contentEvents,
+	): void {
+		events.registerDomEvent(element, 'dragover', (event) => {
 			if (!this.acceptsDrop(event)) {
 				return;
 			}
@@ -259,8 +308,8 @@ class DailyLogPane extends Component {
 				element.addClass(`is-drop-${this.dropPlacement(element, event)}`);
 			}
 		});
-		this.registerDomEvent(element, 'dragleave', () => this.clearDrop(element));
-		this.registerDomEvent(element, 'drop', (event) => {
+		events.registerDomEvent(element, 'dragleave', () => this.clearDrop(element));
+		events.registerDomEvent(element, 'drop', (event) => {
 			event.preventDefault();
 			event.stopPropagation();
 			this.clearDrop(element);
@@ -271,9 +320,7 @@ class DailyLogPane extends Component {
 
 	private acceptsDrop(event: DragEvent): boolean {
 		return Array.from(event.dataTransfer?.types ?? []).some((type) =>
-			[DAILY_TASK_MIME, 'application/x-tavern-task-key', 'application/x-tavern-queue-key'].includes(
-				type,
-			),
+			[DAILY_TASK_MIME, DAILY_SOURCE_MIME].includes(type),
 		);
 	}
 
@@ -352,6 +399,7 @@ class DailyLogPane extends Component {
 	}
 
 	private showError(error: unknown): void {
+		this.renderedLayout = '';
 		this.content.empty();
 		this.content.createDiv({
 			cls: 'tavern-daily-error',
