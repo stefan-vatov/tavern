@@ -34,6 +34,8 @@ the current navigation state. Opening a specific project selects it within the
 app shell. Legacy note-only state restores its project with the sidebar available.
 
 Mobile uses a reusable tab because Obsidian popouts are a desktop facility.
+In narrow windows, project navigation is available from a toolbar toggle;
+selecting a project or the global queue closes that navigation overlay.
 Tavern remains attached to the same Obsidian process and vault; it is not an
 independent executable. Obsidian must remain running.
 
@@ -52,6 +54,15 @@ Project and task persistence remains owned by the persistence page; window and
 navigation state does not replace the independent Markdown content.
 
 ## Local desktop validation
+
+Automated Linux UI validation runs outside the user's desktop in an isolated
+profile on a headless display. Launching Obsidian, opening Tavern, interacting
+with it, and reloading the test plugin must not create windows on the user's
+desktop or take focus from their work. Test builds must not overwrite a live
+linked plugin or trigger reloads in the user's vault. Visible sessions require
+an explicit user request; a headless startup failure never authorizes silently
+falling back to the desktop. Headless validation does not establish native
+window manager focus, workspace placement, or desktop scaling behavior.
 
 Validation of this contract exercises the real loaded plugin in Obsidian. It
 checks repeated opening, project navigation, view replacement by a Markdown

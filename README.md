@@ -47,7 +47,32 @@ Tavern settings with a comma-separated list.
 
 ## Development
 
-For isolated desktop UI testing, follow [How to test Tavern locally in Obsidian](docs/local-testing.md).
+### Background UI testing — default
+
+Automated UI tests must not interrupt your normal work. On Linux, run the real
+Obsidian app with its Ozone headless display backend and control it through CDP,
+using a disposable vault and a separate profile. Opening Tavern, interacting
+with it, and reloading the plugin then happen off your desktop, without visible
+test windows or focus changes. Visible testing requires an explicit request;
+headless startup failure must never silently fall back to your desktop.
+
+Build test copies separately so a vault linked to this checkout does not
+hot-reload while tests are being prepared:
+
+```bash
+export TAVERN_TEST_ROOT="$(mktemp -d /tmp/tavern-ui.XXXXXX)"
+TAVERN_BUILD_OUTFILE="$TAVERN_TEST_ROOT/build/main.js" pnpm run build
+```
+
+That command leaves the live `main.js` untouched. Follow
+[How to test Tavern locally in Obsidian](docs/local-testing.md) for fixture
+setup, the headless launch command, real pointer/keyboard checks, reload and
+window-reuse checks, and cleanup. Reuse the isolated test session while iterating.
+Headless tests still exercise the actual rendered UI and Markdown writes;
+native window-manager focus, placement, and desktop scaling need an explicitly
+requested visible session.
+
+### Interactive workbench — explicitly chosen
 
 From this directory:
 

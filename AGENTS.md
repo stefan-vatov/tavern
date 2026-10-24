@@ -22,6 +22,11 @@ Use `pnpm run dev` while Obsidian has `../test-vault` open. Reload Obsidian afte
 
 ## Local UI Testing
 
+Run automated Linux UI tests headlessly, outside the user's desktop. Never
+create visible test windows unless the user explicitly requests a visible
+session. Build test artifacts in the isolated session directory so development
+does not hot-reload a plugin linked into the user's running vault.
+
 When asked for local testing, computer use testing, or testing Tavern in Obsidian,
 read [the local-testing guide](docs/local-testing.md) before launching anything.
 Follow its session reuse, fixture setup, real UI checks, window-reuse regression,

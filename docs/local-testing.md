@@ -1,14 +1,16 @@
 # How to test Tavern locally in Obsidian
 
 Use a disposable vault and a separate Obsidian profile to test the current plugin
-build in the real desktop app. Reuse that test session while iterating. This is
+build in the real desktop app. On Linux, run automated checks on a headless display
+so test windows, activation, and reloads cannot interrupt the user's desktop.
+Visible testing requires an explicit user request. Reuse that test session while iterating. This is
 the workflow for requests such as “local testing”, “test the plugin in Obsidian”,
 or “computer use testing”. The [app-window contract](../canon/architecture/app-window.md)
 defines the behavior to verify.
 
 ## Prerequisites
 
-- A desktop session with Obsidian installed. The launch command below matches the
+- Obsidian and its Electron runtime installed. The launch command below matches the
   Arch/Omarchy package layout; inspect the installed launcher before using it on
   a different machine.
 - This repository, its installed dependencies, and the pnpm version declared in
@@ -18,11 +20,16 @@ defines the behavior to verify.
   must show two `function` values. Activate the installed Node/pnpm runtime if
   the shell resolves the wrong version; do not replace working dependencies to
   compensate for an incorrect runtime.
-- Native computer-use controls, or the local Chrome DevTools Protocol (CDP)
-  connection described below. CDP controls Obsidian's actual Electron renderer.
+- The local Chrome DevTools Protocol (CDP) connection described below. CDP
+  controls Obsidian's actual Electron renderer, including on a headless display.
+  Native computer-use controls are an option for explicitly requested visible
+  sessions.
 
-Use native computer use when available. If it is disabled or unavailable, state
-that limitation and use CDP. Report which path was used. Invoking a plugin method
+The default Linux path is CDP with Electron's Ozone headless backend. Unset both
+X11 and Wayland display connections when launching it; never silently fall back
+to the user's desktop if headless startup fails. The installed Electron build
+must support that backend. Report the display backend and interaction tool.
+Invoking a plugin method
 checks behavior; pointer/keyboard input checks the rendered interaction. A unit
 test or a successful plugin load alone is not evidence that the UI works.
 
@@ -35,8 +42,8 @@ reusing them. Do not launch another test instance on every iteration.
 For a fresh session, build and create the fixture:
 
 ```bash
-pnpm run build
 export TAVERN_TEST_ROOT="$(mktemp -d /tmp/tavern-ui.XXXXXX)"
+TAVERN_BUILD_OUTFILE="$TAVERN_TEST_ROOT/build/main.js" pnpm run build
 python3 - <<'PY'
 import json, os, secrets, shutil, time
 from pathlib import Path
@@ -57,7 +64,8 @@ profile.mkdir()
 (vault / '.obsidian/community-plugins.json').write_text('["tavern"]')
 (vault / '.obsidian/app.json').write_text('{"safeMode":false}')
 for name in ['main.js', 'manifest.json', 'styles.css']:
-    shutil.copy2(Path.cwd() / name, plugin / name)
+    source = root / 'build/main.js' if name == 'main.js' else Path.cwd() / name
+    shutil.copy2(source, plugin / name)
 (profile / 'obsidian.json').write_text(json.dumps({'vaults': {
     secrets.token_hex(8): {
         'path': str(vault), 'ts': int(time.time() * 1000), 'open': True
@@ -76,6 +84,9 @@ if its format changes, open this fixture through Obsidian's vault chooser.
 The existing `../test-vault` workbench remains an alternative for an explicitly
 chosen development session; its symlink and Hot Reload setup are described in
 [the README](../README.md#development). Do not assume it is disposable.
+The isolated build above leaves the repository's live `main.js` untouched. Do
+not run the root watcher or a default root-output build for automated UI testing
+when a user's vault may have this checkout linked into its plugins.
 
 ## 2. Launch the test profile once
 
@@ -95,7 +106,9 @@ with socket.socket() as sock:
     print(sock.getsockname()[1])
 PY
 )"
-nohup electron43 /usr/lib/obsidian/app.asar \
+export TAVERN_DISPLAY_MODE="ozone-headless"
+nohup env -u DISPLAY -u WAYLAND_DISPLAY -u WAYLAND_SOCKET -u XAUTHORITY \
+  electron43 /usr/lib/obsidian/app.asar --ozone-platform=headless \
   --user-data-dir="$TAVERN_TEST_ROOT/profile" \
   --remote-debugging-address=127.0.0.1 \
   --remote-debugging-port="$TAVERN_CDP_PORT" \
@@ -104,17 +117,30 @@ export TAVERN_OBSIDIAN_PID=$!
 python3 - <<'PY'
 import json, os
 from pathlib import Path
-keys = ['TAVERN_TEST_ROOT', 'TAVERN_CDP_PORT', 'TAVERN_OBSIDIAN_PID']
+keys = ['TAVERN_TEST_ROOT', 'TAVERN_CDP_PORT', 'TAVERN_OBSIDIAN_PID', 'TAVERN_DISPLAY_MODE']
 root = Path(os.environ['TAVERN_TEST_ROOT'])
 (root / 'session.json').write_text(json.dumps({k: os.environ[k] for k in keys}, indent=2))
 print(root / 'session.json')
 PY
 ```
 
-Expected result: the `Tavern Test` vault opens and the log reports a DevTools
+Expected result: the `Tavern Test` vault opens internally, with no windows on the
+user's desktop, and the log reports a DevTools
 WebSocket on the selected port. Record `session.json`'s path in the task's working
 record. Inspect the session and restore its variables when changing shells.
 Leave the user's existing Obsidian process and vaults running.
+
+On Hyprland, inspect `hyprctl clients -j` filtered to the recorded test process
+and confirm it has no desktop clients after launch, Tavern activation, and
+reload. Do not inspect or manipulate unrelated windows. If headless startup is
+unsupported, stop this test session; use a separately isolated virtual display
+or obtain an explicit request for visible testing before continuing.
+
+Headless checks cover the actual rendered interface, input, vault writes, and
+Obsidian popout identity. They do not establish native compositor focus,
+workspace placement, desktop scaling, or OS-window chrome behavior. Those
+specific checks require an explicitly requested visible session. See Chromium's
+[headless testing guidance](https://www.chromium.org/developers/testing/running-tests/).
 
 Once startup finishes, list the targets:
 
@@ -222,8 +248,10 @@ three open tasks.
 The test profile also has an Obsidian host window; count Tavern app windows
 separately from that host.
 
-For another build in the same session, run `pnpm run build`, copy the same three
-artifacts into the fixture plugin directory, and disable/enable Tavern through
+For another build in the same session, run
+`TAVERN_BUILD_OUTFILE="$TAVERN_TEST_ROOT/build/main.js" pnpm run build`, copy that
+isolated `main.js` plus the repository's `manifest.json` and `styles.css` into
+the fixture plugin directory, and disable/enable Tavern through
 the UI or `app.plugins.disablePlugin('tavern')` followed by
 `app.plugins.enablePlugin('tavern')`. Open Tavern again. Do not restart Obsidian
 or make a new profile just to load another build. A build alone does not update
@@ -319,6 +347,10 @@ former window. For a UI-only run, identify the same OS window before and after.
 
 ## 6. Finish without leaving window sprawl
 
+For headless runs, distinguish Obsidian's logical popouts from desktop clients:
+one logical Tavern app window is expected while testing, and zero test-process
+windows may appear on the user's desktop.
+
 Inspect the test process's windows. On this Linux desktop, `hyprctl clients -j`
 can identify them by PID and vault title. Inspect only the known test process.
 Close any note popout accidentally left by testing. Confirm one Tavern window
@@ -351,7 +383,9 @@ window count/identity, Markdown result, and any remaining limitation. Link the
 screenshot or evidence files when useful. Confirm test leftovers are closed or
 explicitly retained, and keep the user's normal vaults untouched.
 
-Run the repository's appropriate automated checks as well. `pnpm run check`
+Run the repository's appropriate automated checks as well. Use
+`TAVERN_BUILD_OUTFILE="$TAVERN_TEST_ROOT/build/main.js" pnpm run check` while
+testing to keep its build away from a live linked plugin. The check
 executes build, coverage, lint/format, unused-code checks, and mutation testing in
 sequence. Actual desktop testing and these checks supply different evidence;
 report each accurately.

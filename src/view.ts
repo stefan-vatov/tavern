@@ -29,7 +29,7 @@ import type { TavernSettings } from './settings-defaults';
 const LIST_RESIZE = {
 	cssVar: '--tavern-list-width',
 	max: 520,
-	min: 220,
+	min: 200,
 };
 const EMPTY_LIBRARY: ProjectLibrary = { projects: [] };
 const DONE_SECTION_NAME = 'Done';
@@ -77,6 +77,7 @@ class TavernView extends ItemView {
 	private availableTasksCollapsed: boolean;
 	private boardPage: TavernBoardPage = 'global';
 	private globalTaskQuery = '';
+	private focusQueueCollapsed = false;
 	private overlayScope: Scope | null = null;
 	private projectQuery = '';
 	private query = '';
@@ -84,6 +85,7 @@ class TavernView extends ItemView {
 	private searchOverlayOpen = false;
 	private selectedPath = '';
 	private sidebarCollapsedSections: Set<string>;
+	private sidebarOpen = false;
 	private closed = false;
 
 	constructor(
@@ -234,6 +236,10 @@ class TavernView extends ItemView {
 		this.dragCleanup?.();
 		this.contentEl.empty();
 		this.contentEl.addClass('tavern-container');
+		this.contentEl.removeClass('is-sidebar-open');
+		if (this.sidebarOpen) {
+			this.contentEl.addClass('is-sidebar-open');
+		}
 
 		const listEl = this.contentEl.createDiv('tavern-panel tavern-panel-list');
 		this.createResizeHandle(this.contentEl, listEl, LIST_RESIZE);
@@ -253,7 +259,9 @@ class TavernView extends ItemView {
 		containerEl.empty();
 		containerEl.addClass('tavern-list');
 
-		containerEl.createDiv({ cls: 'tavern-app-name', text: this.deps.settings.tavernName });
+		const brand = containerEl.createDiv('tavern-app-name');
+		setIcon(brand.createSpan('tavern-app-icon'), 'sparkles');
+		brand.createSpan({ cls: 'tavern-app-title', text: this.deps.settings.tavernName });
 		this.renderSearch(containerEl);
 		const itemsEl = containerEl.createDiv('tavern-list-items');
 		this.renderListItems(itemsEl);
@@ -280,7 +288,13 @@ class TavernView extends ItemView {
 			if (collapsed) {
 				sectionEl.addClass('is-collapsed');
 			}
-			const header = sectionEl.createDiv('tavern-sidebar-section-header');
+			const header = sectionEl.createEl('button', {
+				cls: 'tavern-sidebar-section-header',
+				attr: {
+					'aria-expanded': String(!collapsed),
+					'aria-label': `Toggle ${section.title} projects`,
+				},
+			});
 			this.registerDomEvent(header, 'click', () => {
 				this.toggleSidebarSection(section.title);
 			});
@@ -289,6 +303,11 @@ class TavernView extends ItemView {
 				cls: 'tavern-sidebar-section-count',
 				text: section.projects.length.toString(),
 			});
+			let sidebarIcon = 'chevron-down';
+			if (collapsed) {
+				sidebarIcon = 'chevron-right';
+			}
+			setIcon(header.createSpan('tavern-sidebar-section-chevron'), sidebarIcon);
 			if (!collapsed) {
 				for (const project of section.projects) {
 					this.renderProjectCard(sectionEl, project);
@@ -310,7 +329,9 @@ class TavernView extends ItemView {
 
 	private renderSearch(containerEl: HTMLElement): void {
 		const searchContainer = containerEl.createDiv('tavern-search');
+		setIcon(searchContainer.createSpan('tavern-search-icon'), 'search');
 		const input = searchContainer.createEl('input', {
+			attr: { 'aria-label': 'Search tasks' },
 			cls: 'tavern-search-input',
 			placeholder: 'Search tasks...',
 			type: 'text',
@@ -505,6 +526,7 @@ class TavernView extends ItemView {
 		const animateDetail = this.boardPage !== 'project' || this.selectedPath !== task.projectPath;
 		this.boardPage = 'project';
 		this.selectedPath = task.projectPath;
+		this.sidebarOpen = false;
 		this.closeSearchOverlay(false);
 		this.renderShell(animateDetail);
 	}
@@ -519,6 +541,7 @@ class TavernView extends ItemView {
 			(task) => !task.checked,
 		).length;
 		const header = card.createDiv('tavern-skill-header');
+		setIcon(header.createSpan('tavern-global-icon'), 'list-tree');
 		header.createSpan({ cls: 'tavern-skill-name', text: 'Global queue' });
 		const meta = card.createDiv('tavern-skill-meta');
 		meta.createSpan({
@@ -530,6 +553,7 @@ class TavernView extends ItemView {
 		this.registerDomEvent(card, 'click', () => {
 			const animateDetail = this.boardPage !== 'global';
 			this.boardPage = 'global';
+			this.sidebarOpen = false;
 			this.renderShell(animateDetail);
 		});
 	}
@@ -553,6 +577,7 @@ class TavernView extends ItemView {
 				this.projectQuery = '';
 			}
 			this.selectedPath = project.path;
+			this.sidebarOpen = false;
 			this.renderShell(animateDetail);
 		});
 	}
@@ -595,16 +620,18 @@ class TavernView extends ItemView {
 		const openTasks = this.globalOpenTasks();
 
 		const toolbar = containerEl.createDiv('tavern-detail-toolbar');
-		this.renderGlobalToolbar(toolbar, this.library.projects.length, openTasks.length);
+		this.renderGlobalToolbar(
+			toolbar,
+			this.library.projects.length,
+			this.boardModel().openTaskCount,
+		);
 
-		const body = containerEl.createDiv('tavern-detail-body');
-		this.renderGlobalTaskFilter(body, () => {
+		this.renderGlobalTaskFilter(toolbar, () => {
 			const filteredOpenTasks = this.globalOpenTasks();
-			toolbar.empty();
-			this.renderGlobalToolbar(toolbar, this.library.projects.length, filteredOpenTasks.length);
 			taskBody.empty();
 			this.renderGlobalTaskBody(taskBody, filteredOpenTasks);
 		});
+		const body = containerEl.createDiv('tavern-detail-body');
 		const taskBody = body.createDiv('tavern-global-task-body');
 		this.renderGlobalTaskBody(taskBody, openTasks);
 	}
@@ -619,6 +646,7 @@ class TavernView extends ItemView {
 
 	private renderGlobalTaskFilter(containerEl: HTMLElement, onInput: () => void): void {
 		const filterEl = containerEl.createDiv('tavern-project-filter tavern-global-task-filter');
+		setIcon(filterEl.createSpan('tavern-search-icon'), 'search');
 		const input = filterEl.createEl('input', {
 			attr: { 'aria-label': 'Filter global tasks' },
 			cls: 'tavern-search-input tavern-project-filter-input',
@@ -656,7 +684,7 @@ class TavernView extends ItemView {
 			this.renderShell();
 		});
 		titleWrap.createDiv({ cls: 'tavern-project-section-title', text: 'Available tasks' });
-		header.createSpan({ cls: 'tavern-project-section-count', text: `${openTasks.length}` });
+		header.createSpan({ cls: 'tavern-project-section-count', text: `${openTasks.length} shown` });
 
 		if (this.availableTasksCollapsed) {
 			return;
@@ -682,6 +710,7 @@ class TavernView extends ItemView {
 		left.createSpan({ cls: 'tavern-detail-title', text: 'Global work queue' });
 
 		const right = topRow.createDiv('tavern-toolbar-right');
+		this.renderSidebarToggle(right);
 		const refreshButton = right.createEl('button', {
 			cls: 'tavern-toolbar-btn',
 			attr: { 'aria-label': 'Refresh projects' },
@@ -706,6 +735,7 @@ class TavernView extends ItemView {
 		left.createSpan({ cls: 'tavern-detail-title', text: project.title });
 
 		const right = topRow.createDiv('tavern-toolbar-right');
+		this.renderSidebarToggle(right);
 		const refreshButton = right.createEl('button', {
 			cls: 'tavern-toolbar-btn',
 			attr: { 'aria-label': 'Refresh projects' },
@@ -713,6 +743,21 @@ class TavernView extends ItemView {
 		setIcon(refreshButton, 'refresh-cw');
 		this.registerDomEvent(refreshButton, 'click', () => {
 			void this.refreshProjects();
+		});
+	}
+
+	private renderSidebarToggle(containerEl: HTMLElement): void {
+		const toggle = containerEl.createEl('button', {
+			cls: 'tavern-sidebar-toggle',
+			attr: {
+				'aria-label': 'Toggle project navigation',
+				'aria-expanded': String(this.sidebarOpen),
+			},
+		});
+		setIcon(toggle, 'panel-left');
+		this.registerDomEvent(toggle, 'click', () => {
+			this.sidebarOpen = !this.sidebarOpen;
+			this.renderShell();
 		});
 	}
 
@@ -811,6 +856,7 @@ class TavernView extends ItemView {
 
 	private renderProjectFilter(containerEl: HTMLElement, onInput: () => void): void {
 		const filterEl = containerEl.createDiv('tavern-project-filter');
+		setIcon(filterEl.createSpan('tavern-search-icon'), 'search');
 		const input = filterEl.createEl('input', {
 			attr: { 'aria-label': 'Filter project tasks' },
 			cls: 'tavern-search-input tavern-project-filter-input',
@@ -974,10 +1020,8 @@ class TavernView extends ItemView {
 	private renderTaskPin(containerEl: HTMLElement, task: ProjectBoardTask | undefined): void {
 		const selected = this.isTaskSelected(task);
 		let label = 'Queue';
-		let pinIcon = 'pin';
 		if (selected) {
 			label = 'Queued';
-			pinIcon = 'check';
 		}
 		const toggleButton = containerEl.createEl('button', {
 			cls: 'tavern-project-task-pin tavern-queue-toggle',
@@ -986,7 +1030,7 @@ class TavernView extends ItemView {
 		if (selected) {
 			toggleButton.addClass('is-selected');
 		}
-		setIcon(toggleButton, pinIcon);
+		toggleButton.createSpan({ cls: 'tavern-queue-shortcut', text: 'Q' });
 		toggleButton.createSpan({ cls: 'tavern-queue-toggle-label', text: label });
 		this.registerDomEvent(toggleButton, 'click', (event) => {
 			event.stopPropagation();
@@ -1340,17 +1384,39 @@ class TavernView extends ItemView {
 				void this.addTaskSelection(this.taskFromDrop(event));
 			}
 		});
-		const header = queue.createDiv('tavern-focus-queue-header');
-		header.createSpan({ cls: 'tavern-focus-queue-title', text: 'Focus queue' });
+		const header = queue.createEl('button', {
+			cls: 'tavern-focus-queue-header',
+			attr: {
+				'aria-label': 'Toggle focus queue',
+				'aria-expanded': String(!this.focusQueueCollapsed),
+			},
+		});
+		const heading = header.createSpan('tavern-focus-queue-heading');
+		let focusIcon = 'chevron-down';
+		if (this.focusQueueCollapsed) {
+			focusIcon = 'chevron-right';
+		}
+		setIcon(heading.createSpan('tavern-focus-queue-chevron'), focusIcon);
+		heading.createSpan({ cls: 'tavern-focus-queue-title', text: 'Focus queue' });
 		header.createSpan({ cls: 'tavern-meta-item', text: `${selectedTasks.length} tasks` });
+		this.registerDomEvent(header, 'click', () => {
+			this.focusQueueCollapsed = !this.focusQueueCollapsed;
+			this.renderShell();
+		});
+		if (this.focusQueueCollapsed) {
+			return;
+		}
+		const body = queue.createDiv('tavern-focus-queue-body');
 
 		if (selectedTasks.length === 0) {
-			queue.createDiv({ cls: 'tavern-list-empty', text: 'Pin tasks to build your working list.' });
+			const empty = body.createDiv('tavern-focus-empty');
+			setIcon(empty.createSpan('tavern-focus-empty-icon'), 'pin');
+			empty.createSpan({ text: 'Pin tasks to build your working list' });
 			return;
 		}
 
 		for (const task of selectedTasks) {
-			const row = queue.createDiv('tavern-focus-task');
+			const row = body.createDiv('tavern-focus-task');
 			this.applyTaskNesting(row, task);
 			/* c8 ignore next -- focus queue done de-emphasize (similar covered in project sections test; branch listed) */
 			if (task.checked) {
@@ -1381,9 +1447,9 @@ class TavernView extends ItemView {
 					void this.completeTask(task);
 				}
 			});
-			const content = row.createSpan('tavern-focus-task-text');
+			const content = row.createSpan('tavern-focus-task-content');
 			this.renderEditableTaskText(content, task, task.text);
-			row.createSpan({ cls: 'tavern-focus-task-project', text: task.projectTitle });
+			content.createSpan({ cls: 'tavern-focus-task-project', text: task.projectTitle });
 			const removeButton = row.createEl('button', {
 				cls: 'tavern-project-task-pin tavern-queue-toggle tavern-queue-toggle-remove',
 				attr: { 'aria-label': 'Remove from focus queue' },

@@ -512,18 +512,23 @@ describe('tavern view', () => {
 		expect(textValues(rootElements.at(-1) as FakeElement)).toContain('Select a project note.');
 	});
 
-	it('should render projects, focus queue, and selected project sections', async () => {
-		const vault = createVault({
+	it('should render projects and preserve the focus queue while collapsed', async () => {
+		const files = {
 			'04_Projects/Blogging.md': OTHER_MARKDOWN,
 			'04_Projects/Pi.md': PROJECT_MARKDOWN,
-		});
+		};
+		const vault = createVault(files);
+		const settings = {
+			boardTaskKeys: [
+				'04_Projects/Blogging.md::backlog-1-draft-post',
+				'04_Projects/Pi.md::backlog-1-build-board',
+			],
+			projectFolders: ['04_Projects'],
+			tavernName: 'Tavern',
+		};
 		const view = new TavernView({} as never, {
 			saveSettings: vi.fn(),
-			settings: {
-				boardTaskKeys: ['04_Projects/Blogging.md::backlog-1-draft-post'],
-				projectFolders: ['04_Projects'],
-				tavernName: 'Tavern',
-			},
+			settings,
 			vault,
 		});
 
@@ -540,6 +545,37 @@ describe('tavern view', () => {
 				'Build board',
 			]),
 		);
+
+		const root = rootElements.at(-1) as FakeElement;
+		const toggle = findByAriaLabel(root, 'Toggle focus queue');
+		if (!toggle) {
+			throw new Error('focus queue toggle was not rendered');
+		}
+		expect(toggle.attr['aria-expanded']).toBe('true');
+		toggle.dispatch('click');
+
+		const collapsedToggle = findByAriaLabel(root, 'Toggle focus queue');
+		expect(collapsedToggle?.attr['aria-expanded']).toBe('false');
+		expect(textValues(collapsedToggle as FakeElement)).toContain('2 tasks');
+		expect(findByClass(root, 'tavern-focus-task')).toBeUndefined();
+		collapsedToggle?.dispatch('click');
+
+		expect(findByAriaLabel(root, 'Toggle focus queue')?.attr['aria-expanded']).toBe('true');
+		const queue = findByClass(root, 'tavern-focus-queue') as FakeElement;
+		expect(
+			allElements(queue)
+				.filter((element) => element.type === 'checkbox')
+				.map((element) => element.attr['aria-label']),
+		).toEqual(['Complete Draft post', 'Complete Build board']);
+		expect(settings.boardTaskKeys).toEqual([
+			'04_Projects/Blogging.md::backlog-1-draft-post',
+			'04_Projects/Pi.md::backlog-1-build-board',
+		]);
+		expect(vault.modify).not.toHaveBeenCalled();
+		expect(files).toEqual({
+			'04_Projects/Blogging.md': OTHER_MARKDOWN,
+			'04_Projects/Pi.md': PROJECT_MARKDOWN,
+		});
 	});
 
 	it('should group sidebar projects by their containing subfolder', async () => {
@@ -738,7 +774,7 @@ tavern: project
 		const root = rootElements.at(-1) as FakeElement;
 
 		expect(findByClass(root, 'tavern-panel-list')).toBeDefined();
-		expect(findByClass(root, 'tavern-app-name')?.text).toBe('Tavern');
+		expect(findByClass(root, 'tavern-app-title')?.text).toBe('Tavern');
 		expect(textValues(root)).toEqual(expect.arrayContaining(['Pi', 'Backlog', 'Build board']));
 		expect(textValues(root)).toContain('Blogging');
 	});
@@ -1334,8 +1370,16 @@ tavern: project
 
 		expect(findByAriaLabel(root, 'Filter global tasks')).toBe(globalFilter);
 		expect(globalFilter.value).toBe('draft');
+		expect(textValues(findByClass(root, 'tavern-detail-meta-bar') as FakeElement)).toEqual(
+			expect.arrayContaining(['2 projects', '2 open tasks']),
+		);
 		expect(textValues(root)).toContain('Draft post');
 		expect(textValues(root)).not.toContain('Build board');
+		findByAriaLabel(root, 'Toggle focus queue')?.dispatch('click');
+		expect(textValues(findByClass(root, 'tavern-detail-meta-bar') as FakeElement)).toEqual(
+			expect.arrayContaining(['2 projects', '2 open tasks']),
+		);
+		expect(findByAriaLabel(root, 'Filter global tasks')?.value).toBe('draft');
 		expect(view.getState()).toEqual(
 			expect.objectContaining({
 				globalTaskQuery: 'draft',

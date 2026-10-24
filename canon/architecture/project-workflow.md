@@ -40,6 +40,9 @@ The focus queue selects tasks from project notes across the configured folders.
 Removing a selection from the queue does not complete or delete its source task.
 Editing or completing a queued task acts on its source project note.
 
+The focus queue can be collapsed and expanded without changing its selected
+tasks or their order. Its task count remains visible while collapsed.
+
 Selecting a parent includes its nested task tree. The queue persists selected
 task references and restores their nesting on reopen; reordering a selected
 parent carries its tree as a block. References that no longer resolve are
