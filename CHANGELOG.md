@@ -1,3 +1,9 @@
+## [1.4.1](https://github.com/stefan-vatov/tavern/compare/1.4.0...1.4.1) (2026-10-24)
+
+### Bug Fixes
+
+- validate prepared release files before publication ([a30d2b9](https://github.com/stefan-vatov/tavern/commit/a30d2b982258cd5599d60b09050d5a609b40fe5f))
+
 # [1.4.0](https://github.com/stefan-vatov/tavern/compare/1.3.0...1.4.0) (2026-10-24)
 
 ### Bug Fixes
