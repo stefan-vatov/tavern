@@ -38,10 +38,20 @@ class TavernPlugin extends Plugin {
 					}
 				},
 				remapTaskKeys: async (mapping) => {
-					this.settings.boardTaskKeys = this.settings.boardTaskKeys.map(
-						(key) => mapping.get(key) ?? key,
-					);
-					await this.saveSettings();
+					const previous = this.settings.boardTaskKeys;
+					this.settings.boardTaskKeys = previous
+						.map((key) => mapping.get(key) ?? key)
+						.filter(Boolean);
+					try {
+						await this.saveSettings();
+					} catch (error) {
+						this.settings.boardTaskKeys = previous;
+						throw error;
+					}
+					return async () => {
+						this.settings.boardTaskKeys = previous;
+						await this.saveSettings();
+					};
 				},
 			},
 		);

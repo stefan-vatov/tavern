@@ -30,7 +30,8 @@ relative nesting; deleting a parent removes its nested children. Completing a
 parent moves the tree but does not automatically check every child.
 
 Task operations preserve surrounding frontmatter and preamble. Blank task
-creation and blank text edits are rejected, as are operations on missing tasks.
+creation is rejected, as are operations on missing tasks. Editor cleanup of
+cleared rows follows the shared task-editing contract.
 Dropping a task onto itself leaves it unchanged. Positioned moves between
 different project notes are rejected.
 
@@ -58,8 +59,9 @@ matches.
 Project, available-task, focus-queue, and search-result rows use a dedicated
 drag handle as their drag source. The handle appears on row hover or keyboard
 focus and stays visible on touch-only displays. Dragging elsewhere on a row does
-not move it. Clicking editable task text opens the inline editor; Enter saves
-and Escape cancels. Markdown links in task text remain clickable. Clicking
+not move it. Clicking editable task text opens the inline editor; keyboard creation,
+saving, cancellation, and blank-row cleanup follow the
+[shared task-editing contract](task-editing.md). Markdown links in task text remain clickable. Clicking
 elsewhere on a search result continues to open its source project.
 
 ## Motion feedback

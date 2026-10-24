@@ -286,7 +286,10 @@ app shell, use this checklist:
 - Queue a task and return to the global queue: the selection is present.
 - Drag a task by its handle from the project, available-task, search-result, and
   focus-queue lists. Verify dragging from the row text does not start a move.
-- Click task text to open inline editing; Enter saves and Escape cancels. Confirm
+- Click task text to open inline editing; Ctrl+Enter creates a sibling,
+  Shift+Enter creates a child, bare Enter does nothing, and Escape cancels.
+  Leave the editor to save; clear a parent and leave it to verify its children
+  move up one level. Confirm
   task links remain clickable, and clicking elsewhere on a search result opens
   its source project.
 - Switch between a project and the global queue; confirm the detail transition

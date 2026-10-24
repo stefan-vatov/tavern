@@ -4,17 +4,25 @@ import type { DailyLogController, DailyLogDropTarget } from './daily-log-control
 import { shiftDay, type DailyNote, type DailyTask } from './daily-note';
 import { filterTasks, type ProjectBoardTask } from './project-library';
 import { taskDropPlacement, taskNestingDepth } from './task-drag';
+import type { TaskEditPlan } from './task-edit';
 
 interface DailyLogPaneOptions {
 	day: string;
 	query: string;
 	onStateChange(state: { day: string; query: string }): void;
 	onChanged(): Promise<void>;
+	isEditing(): boolean;
+	finishEditing(): Promise<void>;
+	bindCapture(
+		row: HTMLElement,
+		input: HTMLInputElement,
+		onSave: (plan: TaskEditPlan) => Promise<void>,
+	): unknown;
 	projectTaskFromDrop(event: DragEvent): ProjectBoardTask | undefined;
 	renderTaskText(
 		container: HTMLElement,
 		text: string,
-		onSave: (text: string) => Promise<void>,
+		options: { depth: number; onSave: (plan: TaskEditPlan) => Promise<void> },
 	): void;
 }
 
@@ -29,6 +37,7 @@ class DailyLogPane extends Component {
 	private revision = 0;
 	private note: DailyNote | null = null;
 	private renderedLayout = '';
+	private errorEl: HTMLElement | undefined;
 	private readonly taskRows = new Map<string, { row: HTMLElement; checkbox: HTMLInputElement }>();
 	private contentEvents: Component;
 	private readonly header: HTMLElement;
@@ -120,6 +129,14 @@ class DailyLogPane extends Component {
 	}
 
 	private async selectDay(day: string): Promise<void> {
+		try {
+			await this.options.finishEditing();
+		} catch {
+			return;
+		}
+		if (!this.active) {
+			return;
+		}
 		this.day = day;
 		this.note = null;
 		this.publishState();
@@ -131,6 +148,12 @@ class DailyLogPane extends Component {
 
 	private renderContent(): void {
 		if (!this.active) {
+			return;
+		}
+		if (this.options.isEditing()) {
+			for (const task of this.note?.tasks ?? []) {
+				this.updateTaskChecked(task);
+			}
 			return;
 		}
 		const layout = JSON.stringify({
@@ -202,15 +225,16 @@ class DailyLogPane extends Component {
 			cls: 'tavern-add-task-input',
 			attr: { placeholder: 'Add a todo...', 'aria-label': 'Add todo' },
 		});
-		this.contentEvents.registerDomEvent(input, 'keydown', async (event) => {
-			if (event.key !== 'Enter' || !input.value.trim() || event.isComposing) {
-				return;
+		this.options.bindCapture(row, input, async (plan) => {
+			try {
+				await this.controller.addTaskPlan(this.day, plan);
+			} catch (error) {
+				if (this.active) {
+					this.showError(error);
+					new Notice(`Tavern: ${error instanceof Error ? error.message : String(error)}`);
+				}
+				throw error;
 			}
-			event.preventDefault();
-			const text = input.value;
-			input.disabled = true;
-			await this.mutate(() => this.controller.addTask(this.day, text));
-			input.disabled = false;
 		});
 	}
 
@@ -260,9 +284,20 @@ class DailyLogPane extends Component {
 				void this.mutate(() => this.controller.setTaskChecked(this.day, task.id, checkbox.checked)),
 		);
 		const text = row.createSpan('tavern-project-task-text');
-		this.options.renderTaskText(text, task.text, (nextText) =>
-			this.mutate(() => this.controller.editTask(this.day, task.id, nextText)),
-		);
+		this.options.renderTaskText(text, task.text, {
+			depth,
+			onSave: async (plan) => {
+				try {
+					await this.controller.editTaskPlan(this.day, task.id, plan);
+				} catch (error) {
+					if (this.active) {
+						this.showError(error);
+						new Notice(`Tavern: ${error instanceof Error ? error.message : String(error)}`);
+					}
+					throw error;
+				}
+			},
+		});
 		this.registerDrop(row, task.id);
 	}
 
@@ -384,8 +419,8 @@ class DailyLogPane extends Component {
 
 	private showError(error: unknown): void {
 		this.renderedLayout = '';
-		this.content.empty();
-		this.content.createDiv({
+		this.errorEl?.remove();
+		this.errorEl = this.content.createDiv({
 			cls: 'tavern-daily-error',
 			text: error instanceof Error ? error.message : String(error),
 		});

@@ -3,6 +3,7 @@ import { beforeEach, vi } from 'vitest';
 import { Effect } from 'effect';
 import { setProjectTaskChecked } from '../src/project-actions';
 import type { ProjectBoardTask } from '../src/project-library';
+import { parseProjectNote } from '../src/project-note';
 import { TavernView } from '../src/view';
 import { parseDailyNote } from '../src/daily-note';
 import { DailyLogService } from '../src/daily-log-service';
@@ -164,14 +165,53 @@ class FakeElement {
 			stopPropagation: vi.fn(),
 			...event,
 		};
+		if (type === 'blur' && fakeDocument.activeElement === this) {
+			fakeDocument.activeElement = (event.relatedTarget as FakeElement | undefined) ?? null;
+		}
 		for (const listener of this.listeners.get(type) ?? []) {
 			listener(normalizedEvent);
 		}
 	}
 
 	focus(): void {
+		const previous = fakeDocument.activeElement;
+		if (previous === this) {
+			return;
+		}
 		this.focused = true;
 		fakeDocument.activeElement = this;
+		previous?.dispatch('blur', { relatedTarget: this });
+		this.dispatch('focus', { relatedTarget: previous });
+	}
+
+	get parentElement(): FakeElement | undefined {
+		return this.parent;
+	}
+
+	get nextElementSibling(): FakeElement | undefined {
+		return this.parent?.children[this.parent.children.indexOf(this) + 1];
+	}
+
+	hasClass(name: string): boolean {
+		return this.classes.has(name);
+	}
+
+	closest(selector: string): FakeElement | undefined {
+		if (selector.startsWith('.') && this.classes.has(selector.slice(1))) {
+			return this;
+		}
+		return this.parent?.closest(selector);
+	}
+
+	after(element: FakeElement): void {
+		const { parent } = this;
+		if (!parent) {
+			return;
+		}
+		element.remove();
+		const index = parent.children.indexOf(this);
+		element.parent = parent;
+		parent.children.splice(index + 1, 0, element);
 	}
 
 	getBoundingClientRect(): Pick<DOMRect, 'height' | 'left' | 'top'> {
@@ -181,6 +221,12 @@ class FakeElement {
 	setAttribute(name: string, value: string): void {
 		this.attr[name] = value;
 	}
+
+	setText(text: string): void {
+		this.text = text;
+	}
+
+	select(): void {}
 
 	getAttributeNames(): string[] {
 		return Object.keys(this.attr);
@@ -262,8 +308,8 @@ type FakeMenuItem = {
 	title: string;
 };
 
-const { keymapMock, menuItems, pushedScopes, rootElements, setIconMock, showMenuMock } = vi.hoisted(
-	() => {
+const { keymapMock, menuItems, modalRoots, pushedScopes, rootElements, setIconMock, showMenuMock } =
+	vi.hoisted(() => {
 		const scopes: unknown[] = [];
 		return {
 			keymapMock: {
@@ -278,13 +324,13 @@ const { keymapMock, menuItems, pushedScopes, rootElements, setIconMock, showMenu
 				}),
 			},
 			menuItems: [] as FakeMenuItem[],
+			modalRoots: [] as FakeElement[],
 			pushedScopes: scopes,
 			rootElements: [] as FakeElement[],
 			setIconMock: vi.fn(),
 			showMenuMock: vi.fn(),
 		};
-	},
-);
+	});
 
 type FakeScopeHandler = {
 	func: (event: KeyboardEvent) => false | unknown;
@@ -299,7 +345,13 @@ const triggerScopeKey = (scope: unknown, key: string, event: Partial<KeyboardEve
 	if (!handler) {
 		throw new Error(`scope handler for ${key} was not registered`);
 	}
-	handler.func(event as KeyboardEvent);
+	handler.func({
+		key,
+		preventDefault: vi.fn(),
+		stopImmediatePropagation: vi.fn(),
+		stopPropagation: vi.fn(),
+		...event,
+	} as KeyboardEvent);
 };
 
 class FakeMenuItemApi implements FakeMenuItem {
@@ -395,6 +447,15 @@ vi.mock('obsidian', () => ({
 
 		showAtMouseEvent(event: MouseEvent): void {
 			showMenuMock(event);
+		}
+	},
+	Modal: class {
+		private readonly root = new FakeElement('dialog');
+		readonly titleEl = this.root.createEl('h2', {});
+		readonly contentEl = this.root.createDiv();
+
+		open(): void {
+			modalRoots.push(this.root);
 		}
 	},
 	Notice: vi.fn(),
@@ -493,6 +554,8 @@ const createDailyController = (markdown: string | null = DAILY_MARKDOWN) => ({
 	create: vi.fn(async () => {}),
 	addTask: vi.fn(async () => {}),
 	editTask: vi.fn(async () => {}),
+	addTaskPlan: vi.fn(async () => {}),
+	editTaskPlan: vi.fn(async () => {}),
 	setTaskChecked: vi.fn(async () => {}),
 	moveTask: vi.fn(async () => {}),
 	copyProjectTask: vi.fn(async () => {}),
@@ -511,6 +574,7 @@ describe('tavern view', () => {
 		keymapMock.popScope.mockClear();
 		keymapMock.pushScope.mockClear();
 		menuItems.length = 0;
+		modalRoots.length = 0;
 		pushedScopes.length = 0;
 		fakeDocument.reset();
 		vi.stubGlobal('document', fakeDocument);
@@ -1013,12 +1077,20 @@ tavern: project
 			throw new Error('search result editor did not open on click');
 		}
 		expect(editor.focused).toBe(true);
-		editor.value = 'Publish the draft';
-		editor.dispatch('keydown', {
-			key: 'Enter',
-			preventDefault: vi.fn(),
-			stopPropagation: vi.fn(),
-		});
+		const [overlayScope] = pushedScopes;
+		const editingScope = pushedScopes.at(-1);
+		editor.value = 'Discard this draft';
+		triggerScopeKey(editingScope, 'Escape');
+		expect(findByClass(root, 'tavern-search-overlay')).toBeDefined();
+		expect(pushedScopes).toEqual([overlayScope]);
+		expect(vault.modify).not.toHaveBeenCalled();
+		await vi.waitFor(() => expect(findByAriaLabel(root, 'Edit Draft post')).toBeDefined());
+		findByAriaLabel(root, 'Edit Draft post')!.dispatch('click');
+		const reopened = findByAriaLabel(root, 'Task text for Draft post')!;
+		reopened.value = 'Publish the draft';
+		reopened.dispatch('keydown', { key: 'Enter' });
+		expect(vault.modify).not.toHaveBeenCalled();
+		reopened.dispatch('blur');
 		await vi.waitFor(() => expect(vault.modify).toHaveBeenCalledTimes(1));
 
 		expect(files['04_Projects/Blogging.md']).toContain('- [ ] Publish the draft');
@@ -1520,6 +1592,7 @@ tavern: project
 			throw new Error('section add task controls were not rendered');
 		}
 
+		backlogInput.focus();
 		backlogInput.value = 'Review task creation';
 		createBacklogButton.dispatch('click', { preventDefault: vi.fn(), stopPropagation: vi.fn() });
 		await vi.waitFor(() => expect(vault.modify).toHaveBeenCalledTimes(1));
@@ -1571,6 +1644,8 @@ tavern: project
 			preventDefault: vi.fn(),
 			stopPropagation: vi.fn(),
 		});
+		expect(vault.modify).not.toHaveBeenCalled();
+		editor.dispatch('blur');
 		await vi.waitFor(() => expect(vault.modify).toHaveBeenCalledTimes(1));
 
 		expect(files['04_Projects/Pi.md']).toContain('- [ ] Build inline editor');
@@ -1690,7 +1765,7 @@ tavern: project
 		expect(vault.modify).not.toHaveBeenCalled();
 	});
 
-	it('should add a project task with enter and ignore blank task creation', async () => {
+	it('should capture a project task on blur and ignore plain Enter and blank task creation', async () => {
 		const files = {
 			'04_Projects/Pi.md': PROJECT_MARKDOWN,
 		};
@@ -1711,6 +1786,7 @@ tavern: project
 			throw new Error('add task input was not rendered');
 		}
 
+		input.focus();
 		input.value = '   ';
 		input.dispatch('keydown', { key: 'Enter', preventDefault: vi.fn(), stopPropagation: vi.fn() });
 		expect(vault.modify).not.toHaveBeenCalled();
@@ -1719,34 +1795,146 @@ tavern: project
 		input.dispatch('keydown', { key: 'Escape', preventDefault: vi.fn(), stopPropagation: vi.fn() });
 		expect(vault.modify).not.toHaveBeenCalled();
 
-		input.dispatch('keydown', { key: 'Enter', preventDefault: vi.fn(), stopPropagation: vi.fn() });
+		expect(findByAriaLabel(rootElements.at(-1) as FakeElement, 'Add task to Backlog')).toBe(input);
+		expect(fakeDocument.activeElement).toBe(input);
+		expect(input.value).toBe('');
+		input.value = 'Capture keyboard task';
+		input.dispatch('input');
+		input.dispatch('keydown', { key: 'Enter', ctrlKey: true });
+		const draft = fakeDocument.activeElement!;
+		expect(draft).not.toBe(input);
+		expect(vault.modify).not.toHaveBeenCalled();
+		draft.dispatch('blur');
 		await vi.waitFor(() => expect(vault.modify).toHaveBeenCalledTimes(1));
 
 		expect(files['04_Projects/Pi.md']).toContain('- [ ] Build board\n- [ ] Capture keyboard task');
 	});
 
-	it('should show a notice when project task creation fails', async () => {
+	it('keeps a failed project capture available to retry', async () => {
 		const { Notice } = await import('obsidian');
+		const files = { '04_Projects/Pi.md': PROJECT_MARKDOWN };
+		const vault = createVault(files);
+		vault.modify.mockRejectedValueOnce(new Error('Write failed'));
 		const view = new TavernView({} as never, {
 			saveSettings: vi.fn(),
-			settings: {
-				boardTaskKeys: [],
-				projectFolders: ['04_Projects'],
-				tavernName: 'Tavern',
-			},
-			vault: createVault({
-				'04_Projects/Pi.md': '# Not a tavern project',
-			}),
+			settings: { boardTaskKeys: [], projectFolders: ['04_Projects'], tavernName: 'Tavern' },
+			vault,
 		});
-
 		await view.setState({ mode: 'note', selectedPath: '04_Projects/Pi.md' }, { history: false });
-		const typedView = view as unknown as {
-			addTask: (projectPath: string, sectionName: string, taskText: string) => Promise<void>;
+		const root = rootElements.at(-1)!;
+		const input = findByAriaLabel(root, 'Add task to Backlog')!;
+		input.focus();
+		input.value = 'Keep my capture';
+		input.dispatch('blur');
+		await vi.waitFor(() => expect(Notice).toHaveBeenCalledWith('Tavern could not add the task.'));
+		expect(input.value).toBe('Keep my capture');
+		expect(files['04_Projects/Pi.md']).toBe(PROJECT_MARKDOWN);
+		input.focus();
+		input.dispatch('blur');
+		await vi.waitFor(() => expect(files['04_Projects/Pi.md']).toContain('- [ ] Keep my capture'));
+	});
+
+	it('persists a Ctrl and Shift task chain in one write after focus leaves the editor', async () => {
+		const files = { '04_Projects/Pi.md': NESTED_MARKDOWN };
+		const vault = createVault(files);
+		const view = new TavernView({} as never, {
+			saveSettings: vi.fn(),
+			settings: { boardTaskKeys: [], projectFolders: ['04_Projects'], tavernName: 'Tavern' },
+			vault,
+		});
+		await view.setState({ mode: 'note', selectedPath: '04_Projects/Pi.md' }, { history: false });
+		const root = rootElements.at(-1)!;
+		findByAriaLabel(root, 'Edit Parent task')!.dispatch('click');
+		const original = findByAriaLabel(root, 'Task text for Parent task')!;
+		original.value = 'Renamed parent';
+		original.dispatch('keydown', { key: 'Enter' });
+		expect(fakeDocument.activeElement).toBe(original);
+		original.dispatch('keydown', { key: 'Enter', shiftKey: true });
+		const child = fakeDocument.activeElement!;
+		child.value = 'New child';
+		expect(child.parent!.parent!.style.getPropertyValue('--tavern-task-depth')).toBe('1');
+		const editingScope = pushedScopes.at(-1);
+		triggerScopeKey(editingScope, 'Enter', { ctrlKey: true });
+		const secondChild = fakeDocument.activeElement!;
+		secondChild.value = 'Second child';
+		original.focus();
+		original.dispatch('keydown', { key: 'Enter', ctrlKey: true });
+		const sibling = fakeDocument.activeElement!;
+		sibling.value = 'New sibling';
+		sibling.dispatch('keydown', { key: 'Enter', shiftKey: true });
+		const nested = fakeDocument.activeElement!;
+		nested.value = 'Sibling detail';
+		await Promise.resolve();
+		expect(vault.modify).not.toHaveBeenCalled();
+		nested.dispatch('blur');
+		await vi.waitFor(() => expect(vault.modify).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() => expect(pushedScopes).not.toContain(editingScope));
+		expect(files['04_Projects/Pi.md']).toContain(
+			'- [ ] Renamed parent\n  - [ ] New child\n  - [ ] Second child\n  - [ ] Child task\n    - [ ] Grandchild task\n- [ ] New sibling\n  - [ ] Sibling detail\n- [ ] Next task',
+		);
+	});
+
+	it('promotes a blank parent without losing its children or their selected queue references', async () => {
+		const files = { '04_Projects/Pi.md': NESTED_MARKDOWN };
+		const vault = createVault(files);
+		const before = await Effect.runPromise(parseProjectNote(NESTED_MARKDOWN));
+		const settings = {
+			boardTaskKeys: before.sections[0]!.tasks.map((task) => `04_Projects/Pi.md::${task.id}`),
+			projectFolders: ['04_Projects'],
+			tavernName: 'Tavern',
 		};
+		const view = new TavernView({} as never, { saveSettings: vi.fn(), settings, vault });
+		await view.setState({ mode: 'note', selectedPath: '04_Projects/Pi.md' }, { history: false });
+		const root = rootElements.at(-1)!;
+		findByAriaLabel(root, 'Edit Parent task')!.dispatch('click');
+		const input = findByAriaLabel(root, 'Task text for Parent task')!;
+		input.value = '   ';
+		input.dispatch('blur');
+		await vi.waitFor(() => expect(vault.modify).toHaveBeenCalledTimes(1));
+		expect(files['04_Projects/Pi.md']).toContain(
+			'- [ ] Child task\n  - [ ] Grandchild task\n- [ ] Next task',
+		);
+		expect(files['04_Projects/Pi.md']).not.toContain('Parent task');
+		const after = await Effect.runPromise(parseProjectNote(files['04_Projects/Pi.md']));
+		await vi.waitFor(() =>
+			expect(settings.boardTaskKeys).toEqual(
+				after.sections[0]!.tasks.map((task) => `04_Projects/Pi.md::${task.id}`),
+			),
+		);
+	});
 
-		await typedView.addTask('04_Projects/Pi.md', 'Backlog', 'Review');
-
-		expect(Notice).toHaveBeenCalledWith('Tavern could not add the task.');
+	it('retains an unfinished tree through refresh and a failed write so the same draft can be retried', async () => {
+		const { Notice } = await import('obsidian');
+		const files = { '04_Projects/Pi.md': PROJECT_MARKDOWN };
+		const vault = createVault(files);
+		vault.modify.mockRejectedValueOnce(new Error('Disk unavailable'));
+		const view = new TavernView({} as never, {
+			saveSettings: vi.fn(),
+			settings: { boardTaskKeys: [], projectFolders: ['04_Projects'], tavernName: 'Tavern' },
+			vault,
+		});
+		await view.setState({ mode: 'note', selectedPath: '04_Projects/Pi.md' }, { history: false });
+		const root = rootElements.at(-1)!;
+		findByAriaLabel(root, 'Edit Build board')!.dispatch('click');
+		const input = findByAriaLabel(root, 'Task text for Build board')!;
+		input.value = 'Retained parent';
+		input.dispatch('keydown', { key: 'Enter', shiftKey: true });
+		const child = fakeDocument.activeElement!;
+		child.value = 'Retained child';
+		await view.refreshProjects();
+		expect(findByAriaLabel(root, 'Task text for Build board')).toBe(input);
+		expect(allElements(root)).toContain(child);
+		expect(vault.modify).not.toHaveBeenCalled();
+		child.dispatch('blur');
+		await vi.waitFor(() => expect(Notice).toHaveBeenCalledWith('Tavern could not edit the task.'));
+		expect(files['04_Projects/Pi.md']).toBe(PROJECT_MARKDOWN);
+		expect(child.value).toBe('Retained child');
+		expect(allElements(root)).toContain(child);
+		child.focus();
+		child.dispatch('blur');
+		await vi.waitFor(() =>
+			expect(files['04_Projects/Pi.md']).toContain('- [ ] Retained parent\n  - [ ] Retained child'),
+		);
 	});
 
 	it('should not render add-task inputs on the global aggregate view', async () => {
@@ -3070,7 +3258,7 @@ tavern: project
 			},
 		);
 
-		it.each(['Escape', 'unchanged Enter', 'blank Enter'])(
+		it.each(['Escape', 'unchanged blur'])(
 			'closes the daily editor on %s and permits editing the task again',
 			async (action) => {
 				const controller = createDailyController();
@@ -3079,29 +3267,26 @@ tavern: project
 				await vi.waitFor(() => expect(findByAriaLabel(root, 'Edit Review log')).toBeDefined());
 				findByAriaLabel(root, 'Edit Review log')!.dispatch('click');
 				const input = findByAriaLabel(root, 'Task text for Review log')!;
-				let key = 'Enter';
 				if (action === 'Escape') {
 					input.value = 'Discard this';
-					key = 'Escape';
+					input.dispatch('keydown', { key: 'Escape' });
+				} else {
+					input.dispatch('blur');
 				}
-				if (action === 'blank Enter') {
-					input.value = '   ';
-				}
-				input.dispatch('keydown', { key });
 				await vi.waitFor(() =>
 					expect(findByAriaLabel(root, 'Task text for Review log')).toBeUndefined(),
 				);
-				expect(controller.editTask).not.toHaveBeenCalled();
+				expect(controller.editTaskPlan).not.toHaveBeenCalled();
 				findByAriaLabel(root, 'Edit Review log')!.dispatch('click');
 				const reopened = findByAriaLabel(root, 'Task text for Review log')!;
 				reopened.value = 'Next review';
-				reopened.dispatch('keydown', { key: 'Enter' });
+				reopened.dispatch('blur');
 				await vi.waitFor(() =>
-					expect(controller.editTask).toHaveBeenCalledWith(
-						'2026-10-24',
-						'block:review',
-						'Next review',
-					),
+					expect(controller.editTaskPlan).toHaveBeenCalledWith('2026-10-24', 'block:review', {
+						text: 'Next review',
+						children: [],
+						siblings: [],
+					}),
 				);
 			},
 		);
@@ -3150,13 +3335,13 @@ tavern: project
 			const editor = findByAriaLabel(root, 'Task text for Review log')!;
 			editor.value = 'Review the draft';
 			const beforeEdit = controller.read.mock.calls.length;
-			editor.dispatch('keydown', { key: 'Enter' });
+			editor.dispatch('blur');
 			await vi.waitFor(() => expect(controller.read.mock.calls.length).toBeGreaterThan(beforeEdit));
-			expect(controller.editTask).toHaveBeenCalledWith(
-				'2026-10-24',
-				'block:review',
-				'Review the draft',
-			);
+			expect(controller.editTaskPlan).toHaveBeenCalledWith('2026-10-24', 'block:review', {
+				text: 'Review the draft',
+				children: [],
+				siblings: [],
+			});
 			const checkbox = findByAriaLabel(root, 'Mark Review log complete')!;
 			checkbox.checked = true;
 			const beforeCheck = controller.read.mock.calls.length;
@@ -3166,10 +3351,15 @@ tavern: project
 			);
 			expect(controller.setTaskChecked).toHaveBeenCalledWith('2026-10-24', 'block:review', true);
 			const add = findByAriaLabel(root, 'Add todo')!;
+			add.focus();
 			add.value = 'Capture the next step';
-			add.dispatch('keydown', { key: 'Enter' });
+			add.dispatch('blur');
 			await vi.waitFor(() =>
-				expect(controller.addTask).toHaveBeenCalledWith('2026-10-24', 'Capture the next step'),
+				expect(controller.addTaskPlan).toHaveBeenCalledWith('2026-10-24', {
+					text: 'Capture the next step',
+					children: [],
+					siblings: [],
+				}),
 			);
 		});
 
@@ -3243,6 +3433,7 @@ tavern: project
 			await dailyView(controller).onOpen();
 			const root = rootElements.at(-1)!;
 			findByAriaLabel(root, 'Previous day')!.dispatch('click');
+			await vi.waitFor(() => expect(controller.read).toHaveBeenCalledWith('2026-10-23'));
 			findByAriaLabel(root, 'Next day')!.dispatch('click');
 			await vi.waitFor(() => expect(findByAriaLabel(root, 'Edit Review log')).toBeDefined());
 			resolveEarlier({ day: '2026-10-23', path: 'earlier', note: null });
@@ -3366,7 +3557,7 @@ tavern: project
 					.map((element) => element.attr['aria-label']),
 			).toEqual(['Edit Review log', 'Edit Follow up']);
 			expect(controller.moveTask).not.toHaveBeenCalled();
-			expect(controller.editTask).not.toHaveBeenCalled();
+			expect(controller.editTaskPlan).not.toHaveBeenCalled();
 		});
 
 		it.each([
@@ -3566,13 +3757,13 @@ tavern: project
 			input.value = 'Still composing';
 			input.dispatch('keydown', { key: 'a' });
 			input.dispatch('keydown', { key: 'Enter', isComposing: true });
-			expect(controller.addTask).not.toHaveBeenCalled();
+			expect(controller.addTaskPlan).not.toHaveBeenCalled();
 			expect(input.disabled).toBe(false);
 			expect(input.value).toBe('Still composing');
 		});
 
 		it.each(['success', 'failure'])(
-			'ignores a late capture %s after the app closes',
+			'handles a late capture %s after the app closes without refreshing the closed view',
 			async (outcome) => {
 				const { Notice } = await import('obsidian');
 				const controller = createDailyController();
@@ -3586,15 +3777,24 @@ tavern: project
 						finishCapture = () => reject(new Error('Late failure'));
 					}
 				});
-				controller.addTask.mockImplementation(() => pending);
+				controller.addTaskPlan.mockImplementation(() => pending);
 				const view = dailyView(controller);
 				await view.onOpen();
 				const root = rootElements.at(-1)!;
 				await vi.waitFor(() => expect(findByAriaLabel(root, 'Add todo')).toBeDefined());
 				const input = findByAriaLabel(root, 'Add todo')!;
-				input.value = 'Capture before closing';
-				input.dispatch('keydown', { key: 'Enter' });
-				expect(input.disabled).toBe(true);
+				input.focus();
+				input.dispatch('keydown', { key: 'Enter', shiftKey: true });
+				const child = fakeDocument.activeElement!;
+				child.value = 'Capture before closing';
+				child.dispatch('keydown', { key: 'Enter', shiftKey: true });
+				fakeDocument.activeElement!.value = 'Nested detail';
+				child.focus();
+				child.dispatch('keydown', { key: 'Enter', ctrlKey: true });
+				const sibling = fakeDocument.activeElement!;
+				sibling.value = 'Next capture';
+				sibling.dispatch('blur');
+				await vi.waitFor(() => expect(input.disabled).toBe(true));
 				await view.onClose();
 				const refresh = vi.spyOn(view, 'refreshProjects');
 				const noticesAtClose = vi.mocked(Notice).mock.calls.length;
@@ -3606,19 +3806,31 @@ tavern: project
 				expect(refresh).not.toHaveBeenCalled();
 				expect(Notice).toHaveBeenCalledTimes(noticesAtClose);
 				expect(findByClass(root, 'tavern-daily-error')).toBeUndefined();
+				if (outcome === 'failure') {
+					await vi.waitFor(() => expect(modalRoots).toHaveLength(1));
+					const recovery = findByAriaLabel(modalRoots[0]!, 'Unsaved task edits')!;
+					expect(recovery.tag).toBe('textarea');
+					expect(recovery.value).toBe(
+						'- [ ] Capture before closing\n  - [ ] Nested detail\n- [ ] Next capture',
+					);
+					expect(fakeDocument.activeElement).toBe(recovery);
+				} else {
+					expect(modalRoots).toHaveLength(0);
+				}
 			},
 		);
 
 		it('shows a failed daily action without silently creating another note', async () => {
 			const { Notice } = await import('obsidian');
 			const controller = createDailyController();
-			controller.addTask.mockRejectedValueOnce(new Error('Vault is read-only'));
+			controller.addTaskPlan.mockRejectedValueOnce(new Error('Vault is read-only'));
 			await dailyView(controller).onOpen();
 			const root = rootElements.at(-1)!;
 			await vi.waitFor(() => expect(findByAriaLabel(root, 'Add todo')).toBeDefined());
 			const input = findByAriaLabel(root, 'Add todo')!;
+			input.focus();
 			input.value = 'Keep my capture';
-			input.dispatch('keydown', { key: 'Enter' });
+			input.dispatch('blur');
 			await vi.waitFor(() => expect(textValues(root)).toContain('Vault is read-only'));
 			expect(Notice).toHaveBeenCalledWith('Tavern: Vault is read-only');
 			expect(controller.create).not.toHaveBeenCalled();

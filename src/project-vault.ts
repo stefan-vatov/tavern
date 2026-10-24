@@ -2,9 +2,11 @@
 import { Data, Effect } from 'effect';
 import {
 	addProjectTask,
+	addProjectTaskPlan,
 	completeProjectTask,
 	deleteProjectTask,
 	editProjectTask,
+	editProjectTaskPlan,
 	moveProjectTask,
 	moveProjectTaskToPosition,
 	reorderProjectTask,
@@ -17,6 +19,7 @@ import {
 	type ProjectSourceFile,
 } from './project-library';
 import type { ProjectTaskDropPlacement, ProjectTaskReorderDirection } from './project-note';
+import type { TaskEditPlan } from './task-edit';
 
 type ProjectVaultFile = {
 	path: string;
@@ -110,6 +113,39 @@ const editVaultProjectTask = (
 ): Effect.Effect<void, VaultActionError> =>
 	updateTaskSource(vault, task, (markdown, taskId) => editProjectTask(markdown, taskId, taskText));
 
+const editVaultProjectTaskPlan = (
+	vault: ProjectVault,
+	task: ProjectBoardTask | undefined,
+	plan: TaskEditPlan,
+): Effect.Effect<Map<string, string>, VaultActionError> =>
+	Effect.gen(function* () {
+		if (!task) {
+			return yield* new ProjectVaultError({ message: 'Task was not provided.' });
+		}
+		return yield* updateProjectSourceResult(vault, task.projectPath, (markdown) =>
+			editProjectTaskPlan(markdown, task.id, plan).pipe(
+				Effect.map(({ markdown: next, mapping }) => ({ markdown: next, result: mapping })),
+			),
+		);
+	});
+
+const addVaultProjectTaskPlan = ({
+	vault,
+	projectPath,
+	sectionName,
+	plan,
+}: {
+	vault: ProjectVault;
+	projectPath: string;
+	sectionName: string;
+	plan: TaskEditPlan;
+}): Effect.Effect<Map<string, string>, VaultActionError> =>
+	updateProjectSourceResult(vault, projectPath, (markdown) =>
+		addProjectTaskPlan(markdown, sectionName, plan).pipe(
+			Effect.map(({ markdown: next, mapping }) => ({ markdown: next, result: mapping })),
+		),
+	);
+
 const moveVaultProjectTask = (
 	vault: ProjectVault,
 	task: ProjectBoardTask | undefined,
@@ -175,6 +211,17 @@ const updateProjectSource = (
 	projectPath: string,
 	updateMarkdown: (markdown: string) => Effect.Effect<string, ProjectActionError>,
 ): Effect.Effect<void, VaultActionError> =>
+	updateProjectSourceResult(vault, projectPath, (markdown) =>
+		updateMarkdown(markdown).pipe(Effect.map((next) => ({ markdown: next, result: undefined }))),
+	);
+
+const updateProjectSourceResult = <Result>(
+	vault: ProjectVault,
+	projectPath: string,
+	updateMarkdown: (
+		markdown: string,
+	) => Effect.Effect<{ markdown: string; result: Result }, ProjectActionError>,
+): Effect.Effect<Result, VaultActionError> =>
 	Effect.gen(function* () {
 		const file = findFileByPath(vault, projectPath);
 		if (!file) {
@@ -192,16 +239,17 @@ const updateProjectSource = (
 				}),
 			try: () => vault.read(file),
 		});
-		const nextMarkdown = yield* updateMarkdown(currentMarkdown);
+		const next = yield* updateMarkdown(currentMarkdown);
 
-		return yield* Effect.tryPromise({
+		yield* Effect.tryPromise({
 			catch: () =>
 				new ProjectVaultError({
 					message: 'Unable to write project file.',
 					path: projectPath,
 				}),
-			try: () => vault.modify(file, nextMarkdown),
+			try: () => vault.modify(file, next.markdown),
 		});
+		return next.result;
 	});
 
 const findFileByPath = (vault: ProjectVault, path: string): ProjectVaultFile | undefined =>
@@ -217,9 +265,11 @@ const findFileByPath = (vault: ProjectVault, path: string): ProjectVaultFile | u
 
 export {
 	addVaultProjectTask,
+	addVaultProjectTaskPlan,
 	completeVaultProjectTask,
 	deleteVaultProjectTask,
 	editVaultProjectTask,
+	editVaultProjectTaskPlan,
 	loadVaultProjectLibrary,
 	moveVaultProjectTask,
 	moveVaultProjectTaskToPosition,

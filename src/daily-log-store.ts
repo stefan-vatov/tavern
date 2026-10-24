@@ -11,6 +11,7 @@ import {
 	type DailyTask,
 } from './daily-note';
 import type { ProjectVault, ProjectVaultFile } from './project-vault';
+import { applyTaskEdit, hasTaskEditContent, type TaskEditPlan } from './task-edit';
 
 interface DailyLogVault extends ProjectVault {
 	getAbstractFileByPath(path: string): ProjectVaultFile | null;
@@ -115,6 +116,32 @@ class DailyLogStore {
 		await this.update(day, (markdown) =>
 			editDailyTask(markdown, findDailyTask(markdown, taskId).lineIndex, text),
 		);
+	}
+
+	async editTaskPlan(day: string, taskId: string, plan: TaskEditPlan): Promise<void> {
+		await this.update(
+			day,
+			(markdown) =>
+				applyTaskEdit(markdown, findDailyTask(markdown, taskId).lineIndex, plan).markdown,
+		);
+	}
+
+	async addTaskPlan(day: string, plan: TaskEditPlan): Promise<void> {
+		if (!hasTaskEditContent(plan)) {
+			return;
+		}
+		await this.update(day, (markdown) => {
+			const staged = addDailyTask(markdown, 'Draft');
+			const before = parseDailyNote(markdown).tasks;
+			const after = parseDailyNote(staged).tasks;
+			const index = after.findIndex(
+				(task, taskIndex) =>
+					taskIndex === before.length ||
+					task.lineIndex !== before[taskIndex]?.lineIndex ||
+					task.text !== before[taskIndex]?.text,
+			);
+			return applyTaskEdit(staged, after[index]!.lineIndex, plan).markdown;
+		});
 	}
 
 	async setTaskChecked(day: string, taskId: string, checked: boolean): Promise<void> {

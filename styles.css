@@ -1487,3 +1487,22 @@
 		opacity: 0.72;
 	}
 }
+
+.tavern-task-draft-checkbox {
+	width: 14px;
+	height: 14px;
+	flex: 0 0 14px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 3px;
+}
+
+.tavern-task-draft .tavern-editable-task-text {
+	grid-column: 2 / -1;
+	flex: 1;
+	min-width: 0;
+}
+
+.tavern-task-recovery-text {
+	width: 100%;
+	font-family: var(--font-monospace);
+}

@@ -45,6 +45,23 @@ sections, with `Done` receiving completed tasks automatically.
 By default the project board scans `04_Projects`. Change the scanned folders in
 Tavern settings with a comma-separated list.
 
+## Fast task editing
+
+Click a task's text to edit it. The same shortcuts work in projects, queues,
+search results, and the daily log, including the task capture fields:
+
+- **Ctrl+Enter** creates a sibling underneath and focuses it.
+- **Shift+Enter** creates a nested subitem and focuses it.
+- **Enter** leaves the text and focus unchanged.
+- **Escape** cancels the editing session.
+
+Leaving the editor saves your work. Blank rows disappear when they lose focus;
+if a cleared parent has subitems, they move up one level. New blank drafts stay
+in the interface until they have text, so abandoned entries leave no empty task
+lines in the note. Ordinary **Delete task** still deletes the whole group.
+A failed save keeps the draft editable. If Tavern closes before a save fails,
+a recovery dialog keeps the unsaved task text available to copy as Markdown.
+
 ## Daily Log
 
 The split view keeps the selected queue or project beside **Captain's Log**.

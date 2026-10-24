@@ -34,7 +34,8 @@ Explicit creation supplies a plain Markdown note with the day's heading and
 `General`, `Plan`, and `Notes` headings, creating parent folders as needed.
 Creation must not overwrite an existing note. Daily-task changes preserve
 surrounding note content and operate on the current Markdown. Blank task
-creation and blank task-text edits are rejected. Task reordering and nesting
+creation is rejected. Keyboard entry and cleared-row cleanup follow the
+[shared task-editing contract](task-editing.md). Task reordering and nesting
 carry the task's nested tree.
 
 Daily tasks use the same drag-handle gestures as project tasks: the upper and

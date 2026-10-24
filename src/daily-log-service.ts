@@ -12,7 +12,13 @@ import {
 	setDailyTaskChecked,
 	type DailyTask,
 } from './daily-note';
-import { setProjectTaskChecked } from './project-actions';
+import {
+	addProjectTaskPlan,
+	editProjectTaskPlan,
+	setProjectTaskChecked,
+	type ProjectActionError,
+} from './project-actions';
+import type { TaskEditPlan } from './task-edit';
 import type { ProjectBoardTask } from './project-library';
 import { indentWidth, parseProjectNote } from './project-note';
 
@@ -21,7 +27,7 @@ type DailyTaskLink = { source: TaskEndpoint; copies: TaskEndpoint[]; checked: bo
 type DailyLogServiceOptions = {
 	links: () => DailyTaskLink[];
 	saveLinks: (links: DailyTaskLink[]) => Promise<void>;
-	remapTaskKeys: (mapping: Map<string, string>) => Promise<void>;
+	remapTaskKeys: (mapping: Map<string, string>) => Promise<() => Promise<void>>;
 };
 
 const sameEndpoint = (left: TaskEndpoint, right: TaskEndpoint): boolean =>
@@ -76,6 +82,99 @@ class DailyLogService implements DailyLogController {
 
 	editTask(day: string, taskId: string, text: string): Promise<void> {
 		return this.enqueue(() => this.store.editTask(day, taskId, text));
+	}
+
+	addTaskPlan(day: string, plan: TaskEditPlan): Promise<void> {
+		return this.enqueue(() => this.store.addTaskPlan(day, plan));
+	}
+
+	editTaskPlan(day: string, taskId: string, plan: TaskEditPlan): Promise<void> {
+		return this.enqueue(async () => {
+			const links = structuredClone(this.options.links());
+			if (!plan.text.trim()) {
+				await this.unlinkRemovedTask(this.store.path(day), taskId);
+			}
+			try {
+				await this.store.editTaskPlan(day, taskId, plan);
+			} catch (error) {
+				if (JSON.stringify(this.options.links()) !== JSON.stringify(links)) {
+					await this.options.saveLinks(links);
+				}
+				throw error;
+			}
+		});
+	}
+
+	editProjectTaskPlan(task: ProjectBoardTask, plan: TaskEditPlan): Promise<void> {
+		return this.enqueue(() =>
+			this.writeProjectTaskPlan(
+				task.projectPath,
+				(markdown) => editProjectTaskPlan(markdown, task.id, plan),
+				plan.text.trim() ? undefined : task.id,
+			),
+		);
+	}
+
+	addProjectTaskPlan(projectPath: string, sectionName: string, plan: TaskEditPlan): Promise<void> {
+		return this.enqueue(() =>
+			this.writeProjectTaskPlan(projectPath, (markdown) =>
+				addProjectTaskPlan(markdown, sectionName, plan),
+			),
+		);
+	}
+
+	private async writeProjectTaskPlan(
+		path: string,
+		prepare: (
+			markdown: string,
+		) => Effect.Effect<{ markdown: string; mapping: Map<string, string> }, ProjectActionError>,
+		removedId?: string,
+	): Promise<void> {
+		const file = this.requireFile(path);
+		const result = await Effect.runPromise(prepare(await this.store.vault.read(file)));
+		const links = structuredClone(this.options.links());
+		let undoKeys: (() => Promise<void>) | undefined = undefined;
+		try {
+			if (removedId) {
+				await this.unlinkRemovedTask(path, removedId);
+			}
+			const mapping = new Map(
+				[...result.mapping].map(([before, after]) => [
+					`${path}::${before}`,
+					after ? `${path}::${after}` : '',
+				]),
+			);
+			undoKeys = await this.options.remapTaskKeys(mapping);
+			this.assertActive();
+			await this.store.vault.modify(file, result.markdown);
+		} catch (error) {
+			try {
+				await undoKeys?.();
+			} finally {
+				if (JSON.stringify(this.options.links()) !== JSON.stringify(links)) {
+					await this.options.saveLinks(links);
+				}
+			}
+			throw error;
+		}
+	}
+
+	private async unlinkRemovedTask(path: string, taskId: string): Promise<void> {
+		if (!taskId.startsWith('block:')) {
+			return;
+		}
+		const removed = { path, blockId: taskId.slice('block:'.length) };
+		const links = this.options.links();
+		const next = links
+			.filter((link) => !sameEndpoint(link.source, removed))
+			.map((link) => ({
+				...link,
+				copies: link.copies.filter((copy) => !sameEndpoint(copy, removed)),
+			}))
+			.filter((link) => link.copies.length > 0);
+		if (JSON.stringify(next) !== JSON.stringify(links)) {
+			await this.options.saveLinks(next);
+		}
 	}
 
 	moveTask(day: string, sourceId: string, target: DailyLogDropTarget): Promise<void> {

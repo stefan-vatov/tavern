@@ -15,10 +15,10 @@ import {
 } from './project-library';
 import { indentWidth, type ProjectTask } from './project-note';
 import {
-	addVaultProjectTask,
+	addVaultProjectTaskPlan,
 	completeVaultProjectTask,
 	deleteVaultProjectTask,
-	editVaultProjectTask,
+	editVaultProjectTaskPlan,
 	loadVaultProjectLibrary,
 	moveVaultProjectTask,
 	moveVaultProjectTaskToPosition,
@@ -28,6 +28,9 @@ import {
 import { TAVERN_VIEW_TYPE } from './project-mode';
 import type { TavernSettings } from './settings-defaults';
 import { taskDropPlacement, taskNestingDepth } from './task-drag';
+import type { TaskEditPlan } from './task-edit';
+import showTaskEditRecovery from './task-edit-recovery';
+import { createTaskTextEditor, type TaskTextEditor } from './task-text-editor';
 
 const LIST_RESIZE = {
 	cssVar: '--tavern-list-width',
@@ -61,7 +64,8 @@ type TavernViewDeps = {
 
 type TaskTextEditorOptions = {
 	task?: ProjectBoardTask;
-	onSave?: (text: string) => Promise<void>;
+	onSave?: (plan: TaskEditPlan) => Promise<void>;
+	depth?: number;
 };
 
 type TavernViewState = {
@@ -93,6 +97,7 @@ class TavernView extends ItemView {
 	private globalTaskQuery = '';
 	private focusQueueCollapsed = false;
 	private overlayScope: Scope | null = null;
+	private editingScope: Scope | null = null;
 	private projectQuery = '';
 	private query = '';
 	private searchOverlayEl: HTMLElement | null = null;
@@ -101,6 +106,7 @@ class TavernView extends ItemView {
 	private sidebarCollapsedSections: Set<string>;
 	private sidebarOpen = false;
 	private closed = false;
+	private readonly activeEditors = new Set<TaskTextEditor>();
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -141,6 +147,14 @@ class TavernView extends ItemView {
 		// eslint-disable-next-line eslint/no-underscore-dangle
 		// eslint-disable-next-line eslint/no-underscore-dangle
 		this.closed = true;
+		// Closing must not wait indefinitely for vault I/O; pending saves still report through their callbacks.
+		// eslint-disable-next-line promise/prefer-await-to-then
+		void this.finishTaskEditing().catch(() => {});
+		for (const editor of this.activeEditors) {
+			editor.dispose();
+		}
+		this.activeEditors.clear();
+		this.popTaskEditingScope();
 		if (this.dailyPane) {
 			this.removeChild(this.dailyPane);
 			this.dailyPane = undefined;
@@ -213,6 +227,10 @@ class TavernView extends ItemView {
 		if (this.closed) {
 			return;
 		}
+		if (this.activeEditors.size > 0) {
+			await this.dailyPane?.refresh();
+			return;
+		}
 		const revision = ++this.refreshRevision;
 		this.errorMessage = null;
 
@@ -221,6 +239,10 @@ class TavernView extends ItemView {
 		);
 
 		if (this.closed || revision !== this.refreshRevision) {
+			return;
+		}
+
+		if (this.activeEditors.size > 0) {
 			return;
 		}
 
@@ -275,6 +297,9 @@ class TavernView extends ItemView {
 		if (this.closed) {
 			return;
 		}
+		if (this.activeEditors.size > 0) {
+			return;
+		}
 		this.dragCleanup?.();
 		if (!this.listEl || !this.detailEl) {
 			this.contentEl.empty();
@@ -327,9 +352,12 @@ class TavernView extends ItemView {
 					const key = event.dataTransfer?.getData(DAILY_SOURCE_MIME) ?? '';
 					return this.taskFromSelectionKey(key);
 				},
-				renderTaskText: (container, text, onSave) => {
-					this.renderEditableTaskText(container, text, { onSave });
+				isEditing: () => this.activeEditors.size > 0,
+				finishEditing: () => this.finishTaskEditing(),
+				renderTaskText: (container, text, options) => {
+					this.renderEditableTaskText(container, text, options);
 				},
+				bindCapture: (row, input, onSave) => this.bindTaskCapture(row, input, onSave),
 			}),
 		);
 		void this.dailyPane.refresh();
@@ -538,6 +566,9 @@ class TavernView extends ItemView {
 	}
 
 	private renderSearchResults(containerEl: HTMLElement): void {
+		if (this.activeEditors.size > 0) {
+			return;
+		}
 		const query = this.query.trim();
 		if (query.length === 0) {
 			containerEl.createDiv({
@@ -669,6 +700,9 @@ class TavernView extends ItemView {
 	}
 
 	private renderDetail(containerEl: HTMLElement): void {
+		if (this.activeEditors.size > 0) {
+			return;
+		}
 		containerEl.empty();
 		containerEl.addClass('tavern-detail');
 
@@ -916,21 +950,36 @@ class TavernView extends ItemView {
 		});
 		setIcon(button, 'plus');
 
-		const submit = (event?: Event) => {
-			event?.preventDefault();
-			event?.stopPropagation();
-			const taskText = input.value.trim();
-			if (taskText.length === 0) {
-				return;
+		const editor = this.bindTaskCapture(form, input, async (plan) => {
+			try {
+				if (this.deps.dailyLogs?.addProjectTaskPlan) {
+					await this.deps.dailyLogs.addProjectTaskPlan(project.path, sectionName, plan);
+				} else {
+					const mapping = await Effect.runPromise(
+						addVaultProjectTaskPlan({
+							vault: this.deps.vault,
+							projectPath: project.path,
+							sectionName,
+							plan,
+						}),
+					);
+					await this.remapEditedTaskKeys(project.path, mapping);
+				}
+			} catch (error) {
+				if (!this.closed) {
+					new Notice('Tavern could not add the task.');
+				}
+				throw error;
 			}
-			input.value = '';
-			void this.addTask(project.path, sectionName, taskText);
-		};
-
-		this.registerDomEvent(button, 'click', submit);
-		this.registerDomEvent(input, 'keydown', (event) => {
-			if (event.key === 'Enter') {
-				submit(event);
+		});
+		this.registerDomEvent(button, 'mousedown', (event) => event.preventDefault());
+		this.registerDomEvent(button, 'click', async (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			try {
+				await editor.commit();
+			} catch {
+				/* The draft remains editable and its save callback reports the failure. */
 			}
 		});
 	}
@@ -1128,29 +1177,133 @@ class TavernView extends ItemView {
 		text: string,
 		options: TaskTextEditorOptions,
 	): void {
-		const labelText = text || 'Untitled task';
-		const label = containerEl.createEl('span', {
-			attr: {
-				'aria-label': `Edit ${labelText}`,
-				title: 'Click to edit task',
-				tabindex: '0',
-			},
-			cls: 'tavern-project-task-text tavern-editable-task-text',
+		const label = containerEl.createSpan('tavern-project-task-text tavern-editable-task-text');
+		const row = containerEl.closest<HTMLElement>('.tavern-project-task')!;
+		const depth = options.depth ?? taskNestingDepth(options.task?.indent ?? '');
+		const editor = createTaskTextEditor({
+			containerEl: label,
+			rowEl: row,
+			text,
+			depth,
+			renderText: (container, value) =>
+				this.renderInlineTaskMarkdown(container, value || 'Untitled task'),
+			getSubtreeEnd: () => this.taskSubtreeEnd(row, depth),
+			createDraftRow: (after, nextDepth) => this.createTaskDraftRow(after, nextDepth),
+			onCommit: (plan) =>
+				this.commitTaskEdit(plan, async () => {
+					if (options.onSave) {
+						await options.onSave(plan);
+					} else {
+						await this.editTask(options.task, plan);
+					}
+				}),
+			onEditingChange: (editing) => this.taskEditingChanged(editor, editing),
 		});
-		this.renderInlineTaskMarkdown(label, labelText);
+		this.register(() => editor.dispose());
+	}
 
-		const openEditor = (event?: Event) => {
-			event?.preventDefault();
-			event?.stopPropagation();
-			this.renderTaskTextEditor(label, text, options);
-		};
+	private taskSubtreeEnd(row: HTMLElement, depth: number): HTMLElement {
+		let end = row;
+		let next = row.nextElementSibling as HTMLElement | null;
+		while (
+			next?.hasClass('tavern-project-task') &&
+			Number(next.style.getPropertyValue('--tavern-task-depth')) > depth
+		) {
+			end = next;
+			next = next.nextElementSibling as HTMLElement | null;
+		}
+		return end;
+	}
 
-		this.registerDomEvent(label, 'click', openEditor);
-		this.registerDomEvent(label, 'keydown', (event) => {
-			if (event.key === 'Enter') {
-				openEditor(event);
+	private createTaskDraftRow(
+		after: HTMLElement,
+		depth: number,
+	): { rowEl: HTMLElement; containerEl: HTMLElement } {
+		const row = after.parentElement!.createDiv('tavern-project-task tavern-task-draft');
+		if (after.hasClass('tavern-daily-task') || after.closest('.tavern-daily-content')) {
+			row.addClass('tavern-daily-task');
+		}
+		row.style.setProperty('--tavern-task-depth', String(depth));
+		if (depth > 0) {
+			row.addClass('is-nested');
+		}
+		row.createSpan('tavern-task-draft-checkbox');
+		const container = row.createSpan('tavern-project-task-text tavern-editable-task-text');
+		after.after(row);
+		return { rowEl: row, containerEl: container };
+	}
+
+	private bindTaskCapture(
+		row: HTMLElement,
+		input: HTMLInputElement,
+		onCommit: (plan: TaskEditPlan) => Promise<void>,
+	): TaskTextEditor {
+		const editor = createTaskTextEditor({
+			containerEl: input.parentElement!,
+			rowEl: row,
+			text: '',
+			inputEl: input,
+			isNew: true,
+			renderText: () => {},
+			createDraftRow: (after, depth) => this.createTaskDraftRow(after, depth),
+			onCommit: (plan) => this.commitTaskEdit(plan, () => onCommit(plan)),
+			onEditingChange: (editing) => this.taskEditingChanged(editor, editing),
+		});
+		this.registerDomEvent(input, 'focus', () => editor.open());
+		this.registerDomEvent(input, 'input', () => editor.open());
+		this.register(() => editor.dispose());
+		return editor;
+	}
+
+	private async commitTaskEdit(plan: TaskEditPlan, save: () => Promise<void>): Promise<void> {
+		try {
+			await save();
+		} catch (error) {
+			if (this.closed) {
+				showTaskEditRecovery(this.app, plan);
 			}
-		});
+			throw error;
+		}
+	}
+
+	private taskEditingChanged(editor: TaskTextEditor, editing: boolean): void {
+		if (editing) {
+			this.activeEditors.add(editor);
+			if (!this.editingScope) {
+				const scope = new Scope(this.overlayScope ?? this.app.scope);
+				const handle = (event: KeyboardEvent) => {
+					for (const active of this.activeEditors) {
+						if (active.handleKeydown(event)) {
+							return false;
+						}
+					}
+					return undefined;
+				};
+				scope.register(null, 'Enter', handle);
+				scope.register(null, 'Escape', handle);
+				this.app.keymap.pushScope(scope);
+				this.editingScope = scope;
+			}
+		} else {
+			this.activeEditors.delete(editor);
+			if (this.activeEditors.size === 0) {
+				this.popTaskEditingScope();
+			}
+			if (!this.closed && this.activeEditors.size === 0) {
+				void this.refreshProjects();
+			}
+		}
+	}
+
+	private popTaskEditingScope(): void {
+		if (this.editingScope) {
+			this.app.keymap.popScope(this.editingScope);
+			this.editingScope = null;
+		}
+	}
+
+	private async finishTaskEditing(): Promise<void> {
+		await Promise.all([...this.activeEditors].map((editor) => editor.commit()));
 	}
 
 	private renderInlineTaskMarkdown(containerEl: HTMLElement, text: string): void {
@@ -1176,69 +1329,6 @@ class TavernView extends ItemView {
 				link.addEventListener('click', (event) => event.stopPropagation());
 			}
 		}
-	}
-
-	private renderTaskTextEditor(
-		containerEl: HTMLElement,
-		text: string,
-		{ task, onSave }: TaskTextEditorOptions,
-	): void {
-		containerEl.empty();
-		containerEl.addClass('is-editing');
-		const input = containerEl.createEl('input', {
-			attr: { 'aria-label': `Task text for ${text || 'Untitled task'}` },
-			cls: 'tavern-task-edit-input',
-			type: 'text',
-			value: text,
-		});
-		let committed = false;
-		const restoreLabel = () => {
-			containerEl.empty();
-			containerEl.removeClass('is-editing');
-			this.renderInlineTaskMarkdown(containerEl, text || 'Untitled task');
-			containerEl.focus();
-		};
-
-		const save = () => {
-			if (committed) {
-				return;
-			}
-			committed = true;
-			const nextText = input.value.trim();
-			if (nextText.length === 0 || nextText === text.trim()) {
-				restoreLabel();
-				void this.refreshProjects();
-				return;
-			}
-			if (onSave) {
-				void onSave(nextText);
-			} else {
-				void this.editTask(task, nextText);
-			}
-		};
-		const cancel = () => {
-			if (committed) {
-				return;
-			}
-			committed = true;
-			restoreLabel();
-			void this.refreshProjects();
-		};
-
-		this.registerDomEvent(input, 'click', (event) => event.stopPropagation());
-		this.registerDomEvent(input, 'keydown', (event) => {
-			event.stopPropagation();
-			if (event.key === 'Enter') {
-				event.preventDefault();
-				save();
-			}
-			if (event.key === 'Escape') {
-				event.preventDefault();
-				cancel();
-			}
-		});
-		this.registerDomEvent(input, 'blur', save);
-		input.focus();
 	}
 
 	private showTaskContextMenu(event: MouseEvent, task: ProjectBoardTask | undefined): void {
@@ -1353,72 +1443,37 @@ class TavernView extends ItemView {
 		await this.refreshProjects();
 	}
 
-	private async editTask(task: ProjectBoardTask | undefined, taskText: string): Promise<void> {
-		// Capture pre-op info for best-effort migration of boardTaskKey across text-mutating edit (which invalidates id via renumber/createTaskId using new text).
-		let oldKey = '';
-		let projectPath = '';
-		let sectionName = '';
-		let oldLineIndex = -1;
-		if (task) {
-			oldKey = taskSelectionKey(task);
-			projectPath = task.projectPath ?? '';
-			sectionName = task.sectionName ?? '';
-			oldLineIndex = task.lineIndex ?? -1;
-		}
-		const wasPinned = oldKey.length > 0 && this.deps.settings.boardTaskKeys.includes(oldKey);
-
-		const exit = await Effect.runPromiseExit(editVaultProjectTask(this.deps.vault, task, taskText));
-		if (Exit.isFailure(exit)) {
-			new Notice('Tavern could not edit the task.');
-			/* c8 ignore next -- failure branch + refresh for VaultActionError (added for race/ghost fix) */
-			// Always refresh on VaultActionError (incl. not-found, races) so any ghosts from TOCTOU (RMW between snapshot and op) are cleared. See updateProjectSource.
-			await this.refreshProjects();
-			return;
-		}
-		await this.refreshProjects();
-
-		/* c8 ignore next -- closed guard (if (this._closed) return;) at post-await renderShell/reconcile site in mutation handler (edit etc) (L4); prevents post-close side effects on shared settings */
-		// eslint-disable-next-line eslint/no-underscore-dangle, curly
-		if (this.closed) {
-			return;
-		}
-
-		// Post-refresh: if was pinned, reconcile by project+section+newtext (best-effort; text similarity via exact new text; no id format change). Re-add using existing addTaskToFocusQueue so pin survives edit. Prune in refresh already cleaned stales.
-		/* c8 ignore next -- best-effort text+lineIndex migration after edit (prefers exact pre-edit lineIndex among dup-text candidates in same section to avoid first-match collision); still not fully unit-tested (integration exercises) */
-		if (wasPinned && projectPath && sectionName) {
-			const editedTask = projectTasks(this.library).find(
-				(taskItem) =>
-					taskItem.projectPath === projectPath &&
-					taskItem.sectionName === sectionName &&
-					taskItem.text === taskText &&
-					(oldLineIndex < 0 || taskItem.lineIndex === oldLineIndex),
-			);
-			if (editedTask) {
-				const newKey = taskSelectionKey(editedTask);
-				if (newKey && !this.deps.settings.boardTaskKeys.includes(newKey)) {
-					this.deps.settings.boardTaskKeys = addTaskToFocusQueue(
-						this.deps.settings.boardTaskKeys,
-						newKey,
-					);
-					await this.deps.saveSettings();
-					this.renderShell();
-				}
+	private async editTask(task: ProjectBoardTask | undefined, plan: TaskEditPlan): Promise<void> {
+		try {
+			if (task && this.deps.dailyLogs?.editProjectTaskPlan) {
+				await this.deps.dailyLogs.editProjectTaskPlan(task, plan);
+			} else {
+				const mapping = await Effect.runPromise(
+					editVaultProjectTaskPlan(this.deps.vault, task, plan),
+				);
+				await this.remapEditedTaskKeys(task!.projectPath, mapping);
 			}
+		} catch (error) {
+			if (!this.closed) {
+				new Notice('Tavern could not edit the task.');
+			}
+			throw error;
 		}
 	}
 
-	private async addTask(projectPath: string, sectionName: string, taskText: string): Promise<void> {
-		const exit = await Effect.runPromiseExit(
-			addVaultProjectTask({ projectPath, sectionName, taskText, vault: this.deps.vault }),
-		);
-		if (Exit.isFailure(exit)) {
-			new Notice('Tavern could not add the task.');
-			/* c8 ignore next -- failure branch + refresh for VaultActionError (added for race/ghost fix) */
-			// Always refresh on VaultActionError (incl. not-found, races) so any ghosts from TOCTOU (RMW between snapshot and op) are cleared. See updateProjectSource.
-			await this.refreshProjects();
-			return;
-		}
-		await this.refreshProjects();
+	private async remapEditedTaskKeys(path: string, mapping: Map<string, string>): Promise<void> {
+		const prefix = `${path}::`;
+		const keys = this.deps.settings.boardTaskKeys.flatMap((key) => {
+			if (!key.startsWith(prefix)) {
+				return [key];
+			}
+			const id = mapping.get(key.slice(prefix.length));
+			if (id === '') {
+				return [];
+			}
+			return [`${prefix}${id ?? key.slice(prefix.length)}`];
+		});
+		await this.updateBoardTaskKeys(keys);
 	}
 
 	private async moveTask(task: ProjectBoardTask, targetSectionName: string): Promise<void> {

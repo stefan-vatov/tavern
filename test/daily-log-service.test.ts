@@ -23,6 +23,9 @@ class MemoryVault implements DailyLogVault {
 	}
 	async modify(file: ProjectVaultFile, markdown: string): Promise<void> {
 		this.contents(file.path);
+		if (this.failWritePath === file.path) {
+			throw new Error('Disk write failed.');
+		}
 		this.files.set(file.path, markdown);
 	}
 	async create(path: string, markdown: string): Promise<ProjectVaultFile> {
@@ -74,7 +77,11 @@ const fixture = async () => {
 			links = structuredClone(next);
 		},
 		remapTaskKeys: async (mapping: Map<string, string>) => {
-			focused = focused.map((key) => mapping.get(key) ?? key);
+			const previous = focused;
+			focused = focused.map((key) => mapping.get(key) ?? key).filter(Boolean);
+			return async () => {
+				focused = previous;
+			};
 		},
 	};
 	const service = new DailyLogService(store, options);
@@ -98,6 +105,119 @@ const fixture = async () => {
 };
 
 describe('linked daily log tasks', () => {
+	it('keeps a linked source retryable when reference settings fail, and rolls references back on note-write failure', async () => {
+		const state = await fixture();
+		await state.service.copyProjectTask(day, state.tasks()[0]!);
+		state.focus(state.tasks().map((task) => `${sourcePath}::${task.id}`));
+		const source = state.vault.files.get(sourcePath);
+		const links = structuredClone(state.links());
+		const keys = [...state.focused()];
+		const remap = state.options.remapTaskKeys;
+		state.options.remapTaskKeys = async () => {
+			throw new Error('Settings failed');
+		};
+		const plan = { text: '', children: [], siblings: [] };
+		await expect(state.service.editProjectTaskPlan(state.tasks()[0]!, plan)).rejects.toThrow(
+			'Settings failed',
+		);
+		expect(state.vault.files.get(sourcePath)).toBe(source);
+		expect(state.links()).toEqual(links);
+		expect(state.focused()).toEqual(keys);
+		state.options.remapTaskKeys = remap;
+		state.vault.failWritePath = sourcePath;
+		await expect(state.service.editProjectTaskPlan(state.tasks()[0]!, plan)).rejects.toThrow(
+			'Disk write failed',
+		);
+		expect(state.vault.files.get(sourcePath)).toBe(source);
+		expect(state.links()).toEqual(links);
+		expect(state.focused()).toEqual(keys);
+		state.options.remapTaskKeys = async (mapping) => {
+			const undo = await remap(mapping);
+			return async () => {
+				await undo();
+				throw new Error('Queue rollback failed');
+			};
+		};
+		await expect(state.service.editProjectTaskPlan(state.tasks()[0]!, plan)).rejects.toThrow(
+			'Queue rollback failed',
+		);
+		expect(state.links()).toEqual(links);
+		expect(state.vault.files.get(sourcePath)).toBe(source);
+		state.options.remapTaskKeys = remap;
+		state.vault.failWritePath = undefined;
+		await state.service.editProjectTaskPlan(state.tasks()[0]!, plan);
+		expect(state.tasks()[0]!.text).toBe('Child');
+		await expect(state.service.syncAll()).resolves.toBeUndefined();
+	});
+
+	it('clears a daily parent without deleting its source or breaking its promoted child link', async () => {
+		const state = await fixture();
+		await state.service.copyProjectTask(day, state.tasks()[0]!);
+		const [parent, child] = structuredClone(state.links());
+		await state.service.editTaskPlan(day, `block:${parent!.copies[0]!.blockId}`, {
+			text: '',
+			children: [],
+			siblings: [],
+		});
+		const daily = parseDailyNote(state.vault.files.get(dailyPath)!);
+		expect(daily.tasks.map(({ text, indent }) => ({ text, indent }))).toEqual([
+			{ text: 'Child', indent: '' },
+		]);
+		expect(state.tasks()[0]!.text).toBe('Same title');
+		expect(state.links()).toEqual([child]);
+		await state.service.setTaskChecked(day, daily.tasks[0]!.id, true);
+		expect(state.tasks().find((task) => task.blockId === child!.source.blockId)!.checked).toBe(
+			true,
+		);
+		await expect(state.service.syncAll()).resolves.toBeUndefined();
+	});
+
+	it('clears a project parent, preserves its daily copy, and remaps surviving duplicate queue selections', async () => {
+		const state = await fixture();
+		await state.service.copyProjectTask(day, state.tasks()[0]!);
+		const [parent, child] = structuredClone(state.links());
+		state.focus(state.tasks().map((task) => `${sourcePath}::${task.id}`));
+		await state.service.editProjectTaskPlan(state.tasks()[0]!, {
+			text: '',
+			children: [],
+			siblings: [{ text: 'New sibling', children: [] }],
+		});
+		expect(state.tasks().map(({ text, indent }) => ({ text, indent }))).toEqual([
+			{ text: 'Child', indent: '' },
+			{ text: 'New sibling', indent: '' },
+			{ text: 'Same title', indent: '' },
+		]);
+		expect(state.focused()).toEqual(
+			[state.tasks()[0], state.tasks()[2]].map((task) => `${sourcePath}::${task!.id}`),
+		);
+		expect(state.links()).toEqual([child]);
+		expect(parseDailyNote(state.vault.files.get(dailyPath)!).tasks[0]!.blockId).toBe(
+			parent!.copies[0]!.blockId,
+		);
+		await state.service.setTaskChecked(day, `block:${child!.copies[0]!.blockId}`, true);
+		expect(state.tasks().find((task) => task.blockId === child!.source.blockId)!.checked).toBe(
+			true,
+		);
+		await expect(state.service.syncAll()).resolves.toBeUndefined();
+	});
+
+	it('retains links and source content when clearing a daily row fails to write', async () => {
+		const state = await fixture();
+		await state.service.copyProjectTask(day, state.tasks()[0]!);
+		const links = structuredClone(state.links());
+		const before = state.vault.files.get(dailyPath);
+		state.vault.failWritePath = dailyPath;
+		await expect(
+			state.service.editTaskPlan(day, `block:${links[0]!.copies[0]!.blockId}`, {
+				text: '',
+				children: [],
+				siblings: [],
+			}),
+		).rejects.toThrow('Disk write failed');
+		expect(state.vault.files.get(dailyPath)).toBe(before);
+		expect(state.links()).toEqual(links);
+	});
+
 	it('keeps a parent’s indented prose and children together when completing its daily copy', async () => {
 		const state = await fixture();
 		state.vault.files.set(
