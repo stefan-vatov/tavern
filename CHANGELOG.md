@@ -1,3 +1,9 @@
+## [1.4.3](https://github.com/stefan-vatov/tavern/compare/1.4.2...1.4.3) (2026-10-24)
+
+### Bug Fixes
+
+- match daily log drag and drop to project tasks ([42cec20](https://github.com/stefan-vatov/tavern/commit/42cec200f349b64cae99e1c63771da12e64eeb3c))
+
 ## [1.4.2](https://github.com/stefan-vatov/tavern/compare/1.4.1...1.4.2) (2026-10-24)
 
 ### Bug Fixes
