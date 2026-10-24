@@ -1,3 +1,13 @@
+# [1.4.0](https://github.com/stefan-vatov/tavern/compare/1.3.0...1.4.0) (2026-10-24)
+
+### Bug Fixes
+
+- format generated changelog before publishing releases ([4fecc0d](https://github.com/stefan-vatov/tavern/commit/4fecc0df106220714f0d7ff282e66d805edd5bf8))
+
+### Features
+
+- add linked daily log split view ([f48982d](https://github.com/stefan-vatov/tavern/commit/f48982d02754965da042fb3d0c091e54237780ee))
+
 # [1.3.0](https://github.com/stefan-vatov/tavern/compare/1.2.0...1.3.0) (2026-10-24)
 
 ### Features
