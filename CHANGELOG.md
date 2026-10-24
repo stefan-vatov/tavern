@@ -1,3 +1,9 @@
+# [1.5.0](https://github.com/stefan-vatov/tavern/compare/1.4.3...1.5.0) (2026-10-24)
+
+### Features
+
+- add shared keyboard task editing ([733e533](https://github.com/stefan-vatov/tavern/commit/733e53346687fd058db3ef4df4b2cfa4f055e532))
+
 ## [1.4.3](https://github.com/stefan-vatov/tavern/compare/1.4.2...1.4.3) (2026-10-24)
 
 ### Bug Fixes
