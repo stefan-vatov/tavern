@@ -1,3 +1,9 @@
+## [1.4.2](https://github.com/stefan-vatov/tavern/compare/1.4.1...1.4.2) (2026-10-24)
+
+### Bug Fixes
+
+- keep daily log updates stable and copy queue groups ([4c119bc](https://github.com/stefan-vatov/tavern/commit/4c119bc482e5ce026e30f9978a437f40ae939515))
+
 ## [1.4.1](https://github.com/stefan-vatov/tavern/compare/1.4.0...1.4.1) (2026-10-24)
 
 ### Bug Fixes
