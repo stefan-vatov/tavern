@@ -30,6 +30,19 @@ export class TavernSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName('Daily log folder')
+			.setDesc('Daily logs are stored here as YYYY/MM/YYYY-MM-DD.md.')
+			.addText((text) =>
+				text
+					.setPlaceholder(DEFAULT_SETTINGS.dailyLogFolder ?? '')
+					.setValue(this.plugin.settings.dailyLogFolder ?? DEFAULT_SETTINGS.dailyLogFolder ?? '')
+					.onChange(async (value) => {
+						this.plugin.settings.dailyLogFolder = value.trim().replace(/^\/+|\/+$/g, '');
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
 			.setName('Project source folders')
 			.setDesc('Comma-separated vault folders Tavern scans for project notes, such as 04_Projects.')
 			.addText((text) =>

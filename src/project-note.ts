@@ -23,6 +23,7 @@ type ProjectSection = {
 };
 
 type ProjectTask = {
+	blockId?: string;
 	checked: boolean;
 	id: string;
 	indent: string;
@@ -101,7 +102,7 @@ function moveTaskToSection(
 ): Effect.Effect<ProjectNote, ProjectTaskError> {
 	return Effect.gen(function* () {
 		const workingNote = cloneProjectNote(note);
-		const locatedTask = findTaskLocation(workingNote, taskId);
+		const locatedTask = yield* findTaskLocation(workingNote, taskId);
 
 		if (!locatedTask) {
 			return yield* new ProjectTaskError({ message: 'Task was not found.', taskId });
@@ -140,8 +141,8 @@ function moveTaskToPosition({
 		}
 
 		const workingNote = cloneProjectNote(note);
-		const sourceLocation = findTaskLocation(workingNote, sourceTaskId);
-		const targetLocation = findTaskLocation(workingNote, targetTaskId);
+		const sourceLocation = yield* findTaskLocation(workingNote, sourceTaskId);
+		const targetLocation = yield* findTaskLocation(workingNote, targetTaskId);
 
 		if (!sourceLocation) {
 			return yield* new ProjectTaskError({
@@ -222,7 +223,7 @@ function completeTask(
 ): Effect.Effect<ProjectNote, ProjectTaskError> {
 	return Effect.gen(function* () {
 		const checkedNote = cloneProjectNote(note);
-		const locatedTask = findTaskLocation(checkedNote, taskId);
+		const locatedTask = yield* findTaskLocation(checkedNote, taskId);
 
 		if (!locatedTask) {
 			return yield* new ProjectTaskError({ message: 'Task was not found.', taskId });
@@ -234,7 +235,7 @@ function completeTask(
 			return yield* new ProjectTaskError({ message: 'Task line was not found.', taskId });
 		}
 
-		taskLine.raw = `${taskLine.task.indent}- [x] ${taskLine.task.text}`;
+		taskLine.raw = `${taskLine.task.indent}- [x] ${taskMarkdownText(taskLine.task)}`;
 		taskLine.task = { ...taskLine.task, checked: true };
 
 		return yield* moveTaskToSection(checkedNote, taskId, DONE_SECTION_NAME);
@@ -247,7 +248,7 @@ function deleteTask(
 ): Effect.Effect<ProjectNote, ProjectTaskError> {
 	return Effect.gen(function* () {
 		const workingNote = cloneProjectNote(note);
-		const locatedTask = findTaskLocation(workingNote, taskId);
+		const locatedTask = yield* findTaskLocation(workingNote, taskId);
 
 		if (!locatedTask) {
 			return yield* new ProjectTaskError({ message: 'Task was not found.', taskId });
@@ -280,7 +281,7 @@ function editTaskText(
 		}
 
 		const workingNote = cloneProjectNote(note);
-		const locatedTask = findTaskLocation(workingNote, taskId);
+		const locatedTask = yield* findTaskLocation(workingNote, taskId);
 
 		if (!locatedTask) {
 			return yield* new ProjectTaskError({ message: 'Task was not found.', taskId });
@@ -293,7 +294,7 @@ function editTaskText(
 		}
 
 		const marker = taskLine.task.checked ? 'x' : ' ';
-		taskLine.raw = `${taskLine.task.indent}- [${marker}] ${trimmedTaskText}`;
+		taskLine.raw = `${taskLine.task.indent}- [${marker}] ${taskMarkdownText({ ...taskLine.task, text: trimmedTaskText })}`;
 		taskLine.task = { ...taskLine.task, text: trimmedTaskText };
 		renumberTasks(workingNote);
 
@@ -308,7 +309,7 @@ function reorderTask(
 ): Effect.Effect<ProjectNote, ProjectTaskError> {
 	return Effect.gen(function* () {
 		const workingNote = cloneProjectNote(note);
-		const locatedTask = findTaskLocation(workingNote, taskId);
+		const locatedTask = yield* findTaskLocation(workingNote, taskId);
 
 		if (!locatedTask) {
 			return yield* new ProjectTaskError({ message: 'Task was not found.', taskId });
@@ -417,13 +418,17 @@ function parseSectionLine(line: string, sectionName: string, lineIndex: number):
 
 	const indent = taskMatch[1] ?? '';
 	const checked = (taskMatch[2] ?? '').toLowerCase() === 'x';
-	const text = taskMatch[3] ?? '';
+	const content = taskMatch[3] ?? '';
+	const block = content.match(/(?:^|[\t ])\^([A-Za-z0-9-]+)[\t ]*$/);
+	const blockId = block?.[1];
+	const text = block ? content.slice(0, block.index).trimEnd() : content;
 
 	return {
 		raw: line,
 		task: {
 			checked,
-			id: createTaskId(sectionName, lineIndex, text), // will be overwritten by renumberTasks at parse end + after every mutator for uniqueness via sectionIdx
+			id: blockId ? `block:${blockId}` : createTaskId(sectionName, lineIndex, text),
+			...(blockId ? { blockId } : {}),
 			indent,
 			lineIndex,
 			sectionName,
@@ -458,17 +463,49 @@ function cloneProjectNote(note: ProjectNote): ProjectNote {
 function findTaskLocation(
 	note: ProjectNote,
 	taskIdToFind: string,
-): { sectionIndex: number; taskLineIndex: number } | undefined {
+): Effect.Effect<{ sectionIndex: number; taskLineIndex: number } | undefined, ProjectTaskError> {
+	const matches: { sectionIndex: number; taskLineIndex: number }[] = [];
 	for (const [sectionIndex, section] of note.sections.entries()) {
-		const taskLineIndex = section.lines.findIndex(
-			(line) => line.type === 'task' && line.task.id === taskIdToFind,
-		);
-		if (taskLineIndex !== -1) {
-			return { sectionIndex, taskLineIndex };
+		for (const [taskLineIndex, line] of section.lines.entries()) {
+			if (line.type === 'task' && line.task.id === taskIdToFind) {
+				matches.push({ sectionIndex, taskLineIndex });
+			}
 		}
 	}
+	if (matches.length > 1) {
+		return Effect.fail(
+			new ProjectTaskError({
+				message: 'Task identity is ambiguous: multiple tasks have the same block ID.',
+				taskId: taskIdToFind,
+			}),
+		);
+	}
+	return Effect.succeed(matches[0]);
+}
 
-	return undefined;
+function taskMarkdownText(task: ProjectTask): string {
+	return task.text + (task.blockId ? ` ^${task.blockId}` : '');
+}
+
+function setTaskChecked(
+	note: ProjectNote,
+	taskId: string,
+	checked: boolean,
+): Effect.Effect<ProjectNote, ProjectTaskError> {
+	return Effect.gen(function* () {
+		const workingNote = cloneProjectNote(note);
+		const location = yield* findTaskLocation(workingNote, taskId);
+		if (!location) {
+			return yield* new ProjectTaskError({ message: 'Task was not found.', taskId });
+		}
+		const line = workingNote.sections[location.sectionIndex]!.lines[location.taskLineIndex]!;
+		if (line.type === 'task') {
+			line.task = { ...line.task, checked };
+			line.raw = `${line.task.indent}- [${checked ? 'x' : ' '}] ${taskMarkdownText(line.task)}`;
+		}
+		renumberTasks(workingNote);
+		return workingNote;
+	});
 }
 
 function removeTaskGroup(section: ProjectSection, taskLineIndex: number): SectionLine[] {
@@ -478,17 +515,7 @@ function removeTaskGroup(section: ProjectSection, taskLineIndex: number): Sectio
 		return [];
 	}
 
-	const baseIndent = indentWidth(taskLine.task.indent);
-	let endIndex = taskLineIndex + 1;
-
-	while (endIndex < section.lines.length) {
-		const line = section.lines[endIndex];
-		if (line?.type !== 'task' || indentWidth(line.task.indent) <= baseIndent) {
-			break;
-		}
-		endIndex += 1;
-	}
-
+	const endIndex = findTaskGroupEnd(section, taskLineIndex, taskLine.task.indent);
 	return section.lines.splice(taskLineIndex, endIndex - taskLineIndex);
 }
 
@@ -585,8 +612,12 @@ function reindentTaskGroup(
 	targetIndent: string,
 ): void {
 	for (const line of taskGroup) {
-		/* c8 ignore next -- defensive for text lines inside taskGroup (removeTaskGroup only returns task lines); unreachable via public move/complete */
 		if (line.type !== 'task') {
+			if (line.raw.trim()) {
+				const oldIndent = line.raw.match(/^[\t ]*/)?.[0] ?? '';
+				const relativeWidth = Math.max(0, indentWidth(oldIndent) - indentWidth(sourceIndent));
+				line.raw = targetIndent + ' '.repeat(relativeWidth) + line.raw.slice(oldIndent.length);
+			}
 			continue;
 		}
 
@@ -599,7 +630,7 @@ function reindentTaskGroup(
 		const relativeIndent = '\t'.repeat(Math.floor(delta / 4)) + ' '.repeat(delta % 4);
 		const nextIndent = `${targetIndent}${relativeIndent}`;
 		const marker = line.task.checked ? 'x' : ' ';
-		line.raw = `${nextIndent}- [${marker}] ${line.task.text}`;
+		line.raw = `${nextIndent}- [${marker}] ${taskMarkdownText(line.task)}`;
 		line.task = { ...line.task, indent: nextIndent };
 	}
 }
@@ -650,13 +681,16 @@ function findNextTaskGroupStart(
 function findTaskGroupEnd(section: ProjectSection, taskLineIndex: number, indent: string): number {
 	const baseIndent = indentWidth(indent);
 	let endIndex = taskLineIndex + 1;
-
-	while (endIndex < section.lines.length) {
-		const line = section.lines[endIndex];
-		if (line?.type !== 'task' || indentWidth(line.task.indent) <= baseIndent) {
+	for (let index = endIndex; index < section.lines.length; index += 1) {
+		const line = section.lines[index]!;
+		if (!line.raw.trim()) {
+			continue;
+		}
+		const lineIndent = line.raw.match(/^[\t ]*/)?.[0] ?? '';
+		if (indentWidth(lineIndent) <= baseIndent) {
 			break;
 		}
-		endIndex += 1;
+		endIndex = index + 1;
 	}
 
 	return endIndex;
@@ -718,7 +752,9 @@ function renumberTasks(note: ProjectNote): void {
 			if (line.type === 'task') {
 				line.task = {
 					...line.task,
-					id: createTaskId(section.name, lineIndex, line.task.text, sectionIdx),
+					id: line.task.blockId
+						? `block:${line.task.blockId}`
+						: createTaskId(section.name, lineIndex, line.task.text, sectionIdx),
 					lineIndex,
 					sectionName: section.name,
 				};
@@ -760,6 +796,7 @@ export {
 	ProjectTaskError,
 	reorderTask,
 	serializeProjectNote,
+	setTaskChecked,
 	TAVERN_PROJECT_FRONTMATTER,
 	TAVERN_PROJECT_PROPERTY,
 };

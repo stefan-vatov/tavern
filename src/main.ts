@@ -1,4 +1,6 @@
 import { Notice, Platform, Plugin, type WorkspaceLeaf } from 'obsidian';
+import { DailyLogService } from './daily-log-service';
+import { DailyLogStore, type DailyLogVault } from './daily-log-store';
 import { createTavernViewState } from './project-mode';
 import { DEFAULT_SETTINGS, TavernSettingTab } from './settings';
 import type { TavernSettings } from './settings-defaults';
@@ -12,16 +14,43 @@ const APP_WINDOW_ATTRIBUTE = 'data-tavern-app-window';
 class TavernPlugin extends Plugin {
 	settings!: TavernSettings;
 	private unloaded = false;
+	private dailyLogs: DailyLogService | undefined;
 	private activation: Promise<WorkspaceLeaf | undefined> = Promise.resolve(undefined);
 
 	/* eslint-disable eslint/max-statements */
 	async onload() {
 		await this.loadSettings();
+		this.dailyLogs = new DailyLogService(
+			new DailyLogStore(
+				this.app.vault as unknown as DailyLogVault,
+				() => this.settings.dailyLogFolder ?? DEFAULT_SETTINGS.dailyLogFolder!,
+			),
+			{
+				links: () => this.settings.dailyTaskLinks ?? [],
+				saveLinks: async (links) => {
+					const previous = this.settings.dailyTaskLinks;
+					this.settings.dailyTaskLinks = links;
+					try {
+						await this.saveSettings();
+					} catch (error) {
+						this.settings.dailyTaskLinks = previous;
+						throw error;
+					}
+				},
+				remapTaskKeys: async (mapping) => {
+					this.settings.boardTaskKeys = this.settings.boardTaskKeys.map(
+						(key) => mapping.get(key) ?? key,
+					);
+					await this.saveSettings();
+				},
+			},
+		);
 
 		this.registerView(
 			TAVERN_VIEW_TYPE,
 			(leaf) =>
 				new TavernView(leaf, {
+					dailyLogs: this.dailyLogs,
 					saveSettings: () => this.saveSettings(),
 					settings: this.settings,
 					vault: this.app.vault as unknown as ProjectVault,
@@ -48,8 +77,13 @@ class TavernPlugin extends Plugin {
 		this.registerEvent(
 			this.app.metadataCache.on('changed', (file) => {
 				if (file) {
-					this.refreshOpenTavern();
+					void this.synchronizeDailyTasks(file.path);
 				}
+			}),
+		);
+		this.registerEvent(
+			this.app.vault.on('rename', (file, oldPath) => {
+				void this.renameDailyTaskReferences(oldPath, file.path);
 			}),
 		);
 
@@ -82,6 +116,7 @@ class TavernPlugin extends Plugin {
 
 	onunload() {
 		this.unloaded = true;
+		this.dailyLogs?.dispose();
 		this.app.workspace.detachLeavesOfType(TAVERN_VIEW_TYPE);
 	}
 
@@ -208,11 +243,36 @@ class TavernPlugin extends Plugin {
 	}
 
 	private refreshOpenTavern(): void {
+		if (this.unloaded) {
+			return;
+		}
 		for (const leaf of this.app.workspace.getLeavesOfType(TAVERN_VIEW_TYPE)) {
 			if (leaf.view instanceof TavernView) {
 				void leaf.view.refreshProjects();
 			}
 		}
+	}
+
+	private async synchronizeDailyTasks(path: string): Promise<void> {
+		try {
+			await this.dailyLogs?.syncFile(path);
+		} catch (error) {
+			if (!this.unloaded) {
+				new Notice(`Tavern: ${String(error)}`);
+			}
+		}
+		this.refreshOpenTavern();
+	}
+
+	private async renameDailyTaskReferences(oldPath: string, newPath: string): Promise<void> {
+		try {
+			await this.dailyLogs?.renameFile(oldPath, newPath);
+		} catch (error) {
+			if (!this.unloaded) {
+				new Notice(`Tavern: ${String(error)}`);
+			}
+		}
+		this.refreshOpenTavern();
 	}
 }
 

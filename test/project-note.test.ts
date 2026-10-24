@@ -59,6 +59,49 @@ tavern: project
 const indentWidthForTest = (indent: string): number => indent.replace(/\t/g, '    ').length;
 
 describe('project note domain', () => {
+	it('uses explicit block IDs to distinguish equal task text while preserving legacy task IDs', () => {
+		const markdown =
+			'---\ntavern: project\n---\n# Project\n## Backlog\n- [ ] Repeat ^first-ID\n- [ ] Repeat ^second-ID\n- [ ] Plain\n- [ ] A caret inside ^is text\n';
+		const note = Effect.runSync(parseProjectNote(markdown));
+		expect(note.sections[0]?.tasks).toEqual([
+			{
+				blockId: 'first-ID',
+				checked: false,
+				id: 'block:first-ID',
+				indent: '',
+				lineIndex: 0,
+				sectionName: 'Backlog',
+				text: 'Repeat',
+			},
+			{
+				blockId: 'second-ID',
+				checked: false,
+				id: 'block:second-ID',
+				indent: '',
+				lineIndex: 1,
+				sectionName: 'Backlog',
+				text: 'Repeat',
+			},
+			{
+				checked: false,
+				id: 'backlog-2-plain',
+				indent: '',
+				lineIndex: 2,
+				sectionName: 'Backlog',
+				text: 'Plain',
+			},
+			{
+				checked: false,
+				id: 'backlog-3-a-caret-inside-is-text',
+				indent: '',
+				lineIndex: 3,
+				sectionName: 'Backlog',
+				text: 'A caret inside ^is text',
+			},
+		]);
+		expect(serializeProjectNote(note)).toBe(markdown);
+	});
+
 	describe('isTavernProjectFrontmatter', () => {
 		it('should detect the Tavern project property', () => {
 			expect(isTavernProjectFrontmatter({ tavern: 'project' })).toBe(true);

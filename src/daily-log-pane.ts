@@ -1,0 +1,363 @@
+/* eslint-disable eslint/max-statements, eslint/no-magic-numbers, eslint/no-ternary */
+import { Component, Notice, setIcon } from 'obsidian';
+import type { DailyLogController, DailyLogDropTarget } from './daily-log-controller';
+import {
+	shiftDay,
+	type DailyNote,
+	type DailyTask,
+	type DailyTaskDropPlacement,
+} from './daily-note';
+import { filterTasks, type ProjectBoardTask } from './project-library';
+
+interface DailyLogPaneOptions {
+	day: string;
+	query: string;
+	onStateChange(state: { day: string; query: string }): void;
+	onChanged(): Promise<void>;
+	projectTaskFromDrop(event: DragEvent): ProjectBoardTask | undefined;
+	renderTaskText(
+		container: HTMLElement,
+		text: string,
+		onSave: (text: string) => Promise<void>,
+	): void;
+}
+
+const DAILY_TASK_MIME = 'application/x-tavern-daily-task';
+
+class DailyLogPane extends Component {
+	private day: string;
+	private query: string;
+	private active = true;
+	private revision = 0;
+	private note: DailyNote | null = null;
+	private readonly header: HTMLElement;
+	private readonly content: HTMLElement;
+
+	constructor(
+		container: HTMLElement,
+		private readonly controller: DailyLogController,
+		private readonly options: DailyLogPaneOptions,
+	) {
+		super();
+		this.day = options.day;
+		this.query = options.query;
+		container.addClass('tavern-daily-panel');
+		this.header = container.createDiv('tavern-daily-header');
+		const filter = container.createDiv('tavern-daily-filter');
+		const input = filter.createEl('input', {
+			cls: 'tavern-search-input',
+			type: 'search',
+			attr: { placeholder: 'Search log...', 'aria-label': 'Search log' },
+		});
+		input.value = this.query;
+		this.registerDomEvent(input, 'input', () => {
+			this.query = input.value;
+			this.publishState();
+			this.renderContent();
+		});
+		this.content = container.createDiv('tavern-daily-content');
+		this.renderHeader();
+		this.registerDrop(this.content);
+		this.register(() => {
+			this.active = false;
+			this.revision += 1;
+		});
+	}
+
+	async refresh(): Promise<void> {
+		const revision = ++this.revision;
+		const { day } = this;
+		try {
+			const snapshot = await this.controller.read(day);
+			if (!this.active || revision !== this.revision) {
+				return;
+			}
+			this.note = snapshot.note;
+			this.renderContent();
+		} catch (error) {
+			if (this.active && revision === this.revision) {
+				this.showError(error);
+			}
+		}
+	}
+
+	private publishState(): void {
+		this.options.onStateChange({ day: this.day, query: this.query });
+	}
+
+	private renderHeader(): void {
+		this.header.empty();
+		this.header.createEl('h2', { cls: 'tavern-detail-title', text: "Captain's Log" });
+		this.header.createSpan({ cls: 'tavern-daily-date-chip', text: this.day });
+		const nav = this.header.createEl('nav', {
+			cls: 'tavern-daily-date-nav',
+			attr: { 'aria-label': 'Daily note navigation' },
+		});
+		const previous = nav.createEl('button', {
+			cls: 'tavern-daily-date-step',
+			text: '←',
+			attr: { 'aria-label': 'Previous day' },
+		});
+		nav.createSpan({
+			cls: 'tavern-daily-date-label',
+			text: new Intl.DateTimeFormat(undefined, {
+				month: 'long',
+				day: 'numeric',
+				year: 'numeric',
+			}).format(new Date(`${this.day}T12:00:00`)),
+		});
+		const next = nav.createEl('button', {
+			cls: 'tavern-daily-date-step',
+			text: '→',
+			attr: { 'aria-label': 'Next day' },
+		});
+		const today = nav.createEl('button', { cls: 'tavern-daily-today', text: 'Today' });
+		this.registerDomEvent(previous, 'click', () => void this.selectDay(shiftDay(this.day, -1)));
+		this.registerDomEvent(next, 'click', () => void this.selectDay(shiftDay(this.day, 1)));
+		this.registerDomEvent(today, 'click', () => void this.selectDay(this.controller.today()));
+	}
+
+	private async selectDay(day: string): Promise<void> {
+		this.day = day;
+		this.note = null;
+		this.publishState();
+		this.renderHeader();
+		this.content.empty();
+		await this.refresh();
+	}
+
+	private renderContent(): void {
+		if (!this.active) {
+			return;
+		}
+		this.content.empty();
+		if (!this.note) {
+			this.content.createEl('p', { cls: 'tavern-daily-empty', text: 'No note' });
+			const create = this.content.createEl('button', {
+				cls: 'tavern-daily-create',
+				text: 'Create daily log',
+			});
+			this.registerDomEvent(
+				create,
+				'click',
+				() => void this.mutate(() => this.controller.create(this.day)),
+			);
+			return;
+		}
+		const visible = new Set(filterTasks(this.note.tasks, this.query).map((task) => task.id));
+		const firstSection = this.note.items
+			.filter((item) => item.type === 'heading')
+			.find((item) => item.level === 2);
+		let addRendered = false;
+		let inPlan = false;
+		for (const item of this.note.items) {
+			if (item.type === 'heading') {
+				if (inPlan && item.level <= 3 && !addRendered) {
+					this.renderAddTask();
+					addRendered = true;
+				}
+				inPlan = item.text === 'Plan';
+				this.content.createEl(`h${item.level}` as 'h2', {
+					cls: `tavern-daily-heading is-level-${item.level}`,
+					text: item.text,
+				});
+			} else if (item.type === 'task') {
+				if (visible.has(item.task.id)) {
+					this.renderTask(item.task);
+				}
+			} else if (item.raw.trim() && (!firstSection || item.lineIndex > firstSection.lineIndex)) {
+				this.content.createDiv({ cls: 'tavern-daily-text', text: item.raw });
+			}
+		}
+		if (!addRendered) {
+			this.renderAddTask();
+		}
+	}
+
+	private renderAddTask(): void {
+		const row = this.content.createDiv('tavern-daily-add-task');
+		const input = row.createEl('input', {
+			cls: 'tavern-add-task-input',
+			attr: { placeholder: 'Add a todo...', 'aria-label': 'Add todo' },
+		});
+		this.registerDomEvent(input, 'keydown', async (event) => {
+			if (event.key !== 'Enter' || !input.value.trim() || event.isComposing) {
+				return;
+			}
+			event.preventDefault();
+			const text = input.value;
+			input.disabled = true;
+			await this.mutate(() => this.controller.addTask(this.day, text));
+			input.disabled = false;
+		});
+	}
+
+	private renderTask(task: DailyTask): void {
+		const row = this.content.createDiv('tavern-daily-task tavern-project-task');
+		const depth = Math.floor(task.indent.replace(/\t/g, '    ').length / 2);
+		row.style.setProperty('--tavern-task-depth', String(depth));
+		if (depth > 0) {
+			row.addClass('is-nested');
+		}
+		if (task.checked) {
+			row.addClass('is-done');
+		}
+		const handle = row.createEl('button', {
+			cls: 'tavern-task-drag-handle',
+			attr: { 'aria-label': `Drag ${task.text}`, title: 'Drag to move' },
+		});
+		handle.draggable = true;
+		setIcon(handle, 'grip-vertical');
+		this.registerDomEvent(handle, 'click', (event) => event.stopPropagation());
+		this.registerDomEvent(handle, 'dragstart', (event) => {
+			event.stopPropagation();
+			event.dataTransfer?.setData(
+				DAILY_TASK_MIME,
+				JSON.stringify({ day: this.day, taskId: task.id }),
+			);
+			if (event.dataTransfer) {
+				event.dataTransfer.effectAllowed = 'move';
+			}
+			row.addClass('is-dragging-task');
+		});
+		this.registerDomEvent(handle, 'dragend', () => row.removeClass('is-dragging-task'));
+		const checkbox = row.createEl('input', {
+			type: 'checkbox',
+			attr: {
+				'aria-label': `Mark ${task.text} ${task.checked ? 'incomplete' : 'complete'}`,
+			},
+		});
+		checkbox.checked = task.checked;
+		this.registerDomEvent(
+			checkbox,
+			'change',
+			() =>
+				void this.mutate(() => this.controller.setTaskChecked(this.day, task.id, checkbox.checked)),
+		);
+		const text = row.createSpan('tavern-project-task-text');
+		this.options.renderTaskText(text, task.text, (nextText) =>
+			this.mutate(() => this.controller.editTask(this.day, task.id, nextText)),
+		);
+		this.registerDrop(row, task.id);
+	}
+
+	private registerDrop(element: HTMLElement, taskId?: string): void {
+		this.registerDomEvent(element, 'dragover', (event) => {
+			if (!this.acceptsDrop(event)) {
+				return;
+			}
+			event.preventDefault();
+			event.stopPropagation();
+			if (event.dataTransfer) {
+				event.dataTransfer.dropEffect = event.dataTransfer.types.includes(DAILY_TASK_MIME)
+					? 'move'
+					: 'copy';
+			}
+			element.addClass('is-drop-target');
+			if (taskId) {
+				this.clearPlacement(element);
+				element.addClass(`is-drop-${this.dropPlacement(element, event)}`);
+			}
+		});
+		this.registerDomEvent(element, 'dragleave', () => this.clearDrop(element));
+		this.registerDomEvent(element, 'drop', (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			this.clearDrop(element);
+			const target = taskId ? { taskId, placement: this.dropPlacement(element, event) } : undefined;
+			void this.drop(event, target);
+		});
+	}
+
+	private acceptsDrop(event: DragEvent): boolean {
+		return Array.from(event.dataTransfer?.types ?? []).some((type) =>
+			[DAILY_TASK_MIME, 'application/x-tavern-task-key', 'application/x-tavern-queue-key'].includes(
+				type,
+			),
+		);
+	}
+
+	private dropPlacement(row: HTMLElement, event: DragEvent): DailyTaskDropPlacement {
+		const rect = row.getBoundingClientRect();
+		const relativeY = event.clientY - rect.top;
+		if (relativeY <= rect.height / 3) {
+			return 'before';
+		}
+		if (relativeY >= (rect.height * 2) / 3) {
+			return 'after';
+		}
+		if (event.clientX - rect.left >= 63) {
+			return 'child';
+		}
+		return 'after';
+	}
+
+	private clearPlacement(element: HTMLElement): void {
+		element.removeClass('is-drop-before');
+		element.removeClass('is-drop-after');
+		element.removeClass('is-drop-child');
+	}
+
+	private clearDrop(element: HTMLElement): void {
+		element.removeClass('is-drop-target');
+		this.clearPlacement(element);
+	}
+
+	private async drop(event: DragEvent, target?: DailyLogDropTarget): Promise<void> {
+		const raw = event.dataTransfer?.getData(DAILY_TASK_MIME);
+		if (raw) {
+			try {
+				const source: unknown = JSON.parse(raw);
+				if (
+					!source ||
+					typeof source !== 'object' ||
+					!('day' in source) ||
+					!('taskId' in source) ||
+					source.day !== this.day ||
+					typeof source.taskId !== 'string' ||
+					!target
+				) {
+					return;
+				}
+				await this.mutate(() =>
+					this.controller.moveTask(this.day, source.taskId as string, target),
+				);
+			} catch (error) {
+				this.showError(error);
+			}
+			return;
+		}
+		const source = this.options.projectTaskFromDrop(event);
+		if (source) {
+			await this.mutate(() => this.controller.copyProjectTask(this.day, source, target));
+		}
+	}
+
+	private async mutate(action: () => Promise<void>): Promise<void> {
+		try {
+			await action();
+			if (!this.active) {
+				return;
+			}
+			await this.options.onChanged();
+			if (this.active) {
+				await this.refresh();
+			}
+		} catch (error) {
+			if (this.active) {
+				this.showError(error);
+				new Notice(`Tavern: ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
+	}
+
+	private showError(error: unknown): void {
+		this.content.empty();
+		this.content.createDiv({
+			cls: 'tavern-daily-error',
+			text: error instanceof Error ? error.message : String(error),
+		});
+	}
+}
+
+export default DailyLogPane;

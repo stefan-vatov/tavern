@@ -1,6 +1,10 @@
+import type { DailyTaskLink } from './daily-log-service';
+
 interface TavernSettings {
 	availableTasksCollapsed?: boolean;
 	boardTaskKeys: string[];
+	dailyLogFolder?: string;
+	dailyTaskLinks?: DailyTaskLink[];
 	projectFolders: string[];
 	sidebarCollapsedSections?: string[];
 	tavernName: string;
@@ -9,6 +13,8 @@ interface TavernSettings {
 const DEFAULT_SETTINGS: TavernSettings = {
 	availableTasksCollapsed: false,
 	boardTaskKeys: [],
+	dailyLogFolder: '02_Daily_Log/Daily_Log',
+	dailyTaskLinks: [],
 	projectFolders: ['04_Projects'],
 	sidebarCollapsedSections: [],
 	tavernName: 'Tavern',

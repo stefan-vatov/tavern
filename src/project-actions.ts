@@ -9,6 +9,7 @@ import {
 	parseProjectNote,
 	reorderTask,
 	serializeProjectNote,
+	setTaskChecked,
 	type ProjectNoteParseError,
 	type ProjectTaskError,
 	type ProjectTaskDropPlacement,
@@ -31,6 +32,20 @@ const completeProjectTask = (
 		Effect.flatMap((note) => completeTask(note, taskId)),
 		Effect.map(serializeProjectNote),
 	);
+
+const setProjectTaskChecked = (
+	markdown: string,
+	taskId: string,
+	checked: boolean,
+): Effect.Effect<string, ProjectActionError> => {
+	if (checked) {
+		return completeProjectTask(markdown, taskId);
+	}
+	return parseProjectNote(markdown).pipe(
+		Effect.flatMap((note) => setTaskChecked(note, taskId, false)),
+		Effect.map(serializeProjectNote),
+	);
+};
 
 const addProjectTask = (
 	markdown: string,
@@ -100,5 +115,6 @@ export {
 	moveProjectTask,
 	moveProjectTaskToPosition,
 	reorderProjectTask,
+	setProjectTaskChecked,
 };
 export type { ProjectActionError };

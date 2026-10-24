@@ -15,6 +15,7 @@ const { settingRecords, textControls } = vi.hoisted(() => ({
 
 vi.mock('obsidian', () => ({
 	App: class {},
+	Component: class {},
 	ItemView: class {},
 	Notice: vi.fn(),
 	Plugin: class {},
@@ -76,6 +77,7 @@ describe('settings tab', () => {
 			saveSettings,
 			settings: {
 				boardTaskKeys: [],
+				dailyLogFolder: '02_Daily_Log/Daily_Log',
 				projectFolders: ['04_Projects'],
 				sidebarCollapsedSections: [],
 				tavernName: 'Tavern',
@@ -85,19 +87,26 @@ describe('settings tab', () => {
 
 		tab.display();
 		await textControls[0]?.onChangeHandler?.(' Project Pub ');
-		await textControls[1]?.onChangeHandler?.('04_Projects, 05_Areas,, ');
+		await textControls[1]?.onChangeHandler?.(' /Daily Notes/Logs/ ');
+		await textControls[2]?.onChangeHandler?.('04_Projects, 05_Areas,, ');
 
 		expect(empty).toHaveBeenCalled();
 		expect(settingRecords.map((record) => record.name)).toEqual([
 			'Tavern name',
+			'Daily log folder',
 			'Project source folders',
 		]);
-		expect(settingRecords[1]?.desc).toBe(
+		expect(settingRecords[2]?.desc).toBe(
 			'Comma-separated vault folders Tavern scans for project notes, such as 04_Projects.',
 		);
-		expect(textControls.map((control) => control.value)).toEqual(['Tavern', '04_Projects']);
+		expect(textControls.map((control) => control.value)).toEqual([
+			'Tavern',
+			'02_Daily_Log/Daily_Log',
+			'04_Projects',
+		]);
+		expect(plugin.settings.dailyLogFolder).toBe('Daily Notes/Logs');
 		expect(plugin.settings.tavernName).toBe('Project Pub');
 		expect(plugin.settings.projectFolders).toEqual(['04_Projects', '05_Areas']);
-		expect(saveSettings).toHaveBeenCalledTimes(2);
+		expect(saveSettings).toHaveBeenCalledTimes(3);
 	});
 });

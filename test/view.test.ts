@@ -1,6 +1,11 @@
 /* eslint-disable eslint/max-classes-per-file, eslint/max-lines, eslint/max-statements, eslint/no-magic-numbers, promise/prefer-await-to-callbacks, @typescript-eslint/no-explicit-any */
 import { beforeEach, vi } from 'vitest';
+import { Effect } from 'effect';
+import { setProjectTaskChecked } from '../src/project-actions';
+import type { ProjectBoardTask } from '../src/project-library';
 import { TavernView } from '../src/view';
+import { parseDailyNote } from '../src/daily-note';
+import type { DailyLogController, DailyLogSnapshot } from '../src/daily-log-controller';
 import { TAVERN_VIEW_TYPE } from '../src/project-mode';
 import type { ProjectVaultFile } from '../src/project-vault';
 
@@ -107,6 +112,13 @@ class FakeElement {
 
 	addEventListener(type: string, listener: Listener): void {
 		this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+	}
+
+	removeEventListener(type: string, listener: Listener): void {
+		this.listeners.set(
+			type,
+			(this.listeners.get(type) ?? []).filter((candidate) => candidate !== listener),
+		);
 	}
 
 	createDiv(options?: string | { cls?: string; text?: string }): FakeElement {
@@ -446,6 +458,35 @@ const createVault = (files: Record<string, string>) => {
 		read: vi.fn(async (file: ProjectVaultFile) => files[file.path] ?? ''),
 	};
 };
+
+const DAILY_MARKDOWN =
+	'# 2026-10-24\n## General\n### Plan\n- [ ] Review log ^review\n  - [ ] Follow up ^follow\n### Notes\nKeep the narrative.\n';
+
+const createDailyController = (markdown: string | null = DAILY_MARKDOWN) => ({
+	today: vi.fn(() => '2026-10-24'),
+	read: vi.fn(
+		async (day: string): Promise<DailyLogSnapshot> => ({
+			day,
+			path: `logs/${day}.md`,
+			// eslint-disable-next-line eslint/no-ternary
+			note: markdown === null ? null : parseDailyNote(markdown),
+		}),
+	),
+	create: vi.fn(async () => {}),
+	addTask: vi.fn(async () => {}),
+	editTask: vi.fn(async () => {}),
+	setTaskChecked: vi.fn(async () => {}),
+	moveTask: vi.fn(async () => {}),
+	copyProjectTask: vi.fn(async () => {}),
+});
+
+const dailyView = (dailyLogs: DailyLogController) =>
+	new TavernView({} as never, {
+		dailyLogs,
+		saveSettings: vi.fn(),
+		settings: { boardTaskKeys: [], projectFolders: ['04_Projects'], tavernName: 'Tavern' },
+		vault: createVault({ '04_Projects/Pi.md': PROJECT_MARKDOWN }),
+	});
 
 describe('tavern view', () => {
 	beforeEach(() => {
@@ -2883,5 +2924,472 @@ tavern: project
 		// reaches targetIndex = keys.indexOf(bad) <0 after having sourceKeys>0 ; early return, no *additional* save from reorder
 		expect(saveSettings.mock.calls.length).toBe(savesBefore);
 		expect(settings.boardTaskKeys).toEqual([validSourceKey]);
+	});
+	describe('Captain’s Log in the app shell', () => {
+		it('reads only today when missing and creates a daily log only after the explicit action', async () => {
+			const controller = createDailyController(null);
+			const view = dailyView(controller);
+			await view.onOpen();
+			const root = rootElements.at(-1)!;
+			await vi.waitFor(() => expect(textValues(root)).toContain('No note'));
+			expect(controller.read.mock.calls.every(([day]) => day === '2026-10-24')).toBe(true);
+			expect(controller.create).not.toHaveBeenCalled();
+			findByText(root, 'Create daily log')!.dispatch('click');
+			await vi.waitFor(() => expect(controller.create).toHaveBeenCalledWith('2026-10-24'));
+		});
+
+		it('navigates by day, returns to today and starts a reopened view at today', async () => {
+			const controller = createDailyController();
+			const view = dailyView(controller);
+			await view.onOpen();
+			const root = rootElements.at(-1)!;
+			findByAriaLabel(root, 'Previous day')!.dispatch('click');
+			await vi.waitFor(() => expect(controller.read).toHaveBeenLastCalledWith('2026-10-23'));
+			findByAriaLabel(root, 'Next day')!.dispatch('click');
+			await vi.waitFor(() => expect(controller.read).toHaveBeenLastCalledWith('2026-10-24'));
+			findByAriaLabel(root, 'Previous day')!.dispatch('click');
+			findByText(root, 'Today')!.dispatch('click');
+			await vi.waitFor(() => expect(controller.read).toHaveBeenLastCalledWith('2026-10-24'));
+			findByAriaLabel(root, 'Previous day')!.dispatch('click');
+			await view.onClose();
+			controller.today.mockReturnValue('2026-10-25');
+			await view.onOpen();
+			await vi.waitFor(() => expect(controller.read).toHaveBeenLastCalledWith('2026-10-25'));
+		});
+
+		it('renders narrative and nested tasks, then routes editing, checking and capture to the selected log', async () => {
+			const controller = createDailyController();
+			const view = dailyView(controller);
+			await view.onOpen();
+			const root = rootElements.at(-1)!;
+			await vi.waitFor(() => expect(findByAriaLabel(root, 'Edit Review log')).toBeDefined());
+			expect(textValues(root)).toContain('Keep the narrative.');
+			const child = findByAriaLabel(root, 'Mark Follow up complete')!.parent!;
+			expect(child.style.getPropertyValue('--tavern-task-depth')).toBe('1');
+			findByAriaLabel(root, 'Edit Review log')!.dispatch('click');
+			const editor = findByAriaLabel(root, 'Task text for Review log')!;
+			editor.value = 'Review the draft';
+			const beforeEdit = controller.read.mock.calls.length;
+			editor.dispatch('keydown', { key: 'Enter' });
+			await vi.waitFor(() => expect(controller.read.mock.calls.length).toBeGreaterThan(beforeEdit));
+			expect(controller.editTask).toHaveBeenCalledWith(
+				'2026-10-24',
+				'block:review',
+				'Review the draft',
+			);
+			const checkbox = findByAriaLabel(root, 'Mark Review log complete')!;
+			checkbox.checked = true;
+			const beforeCheck = controller.read.mock.calls.length;
+			checkbox.dispatch('change');
+			await vi.waitFor(() =>
+				expect(controller.read.mock.calls.length).toBeGreaterThan(beforeCheck),
+			);
+			expect(controller.setTaskChecked).toHaveBeenCalledWith('2026-10-24', 'block:review', true);
+			const add = findByAriaLabel(root, 'Add todo')!;
+			add.value = 'Capture the next step';
+			add.dispatch('keydown', { key: 'Enter' });
+			await vi.waitFor(() =>
+				expect(controller.addTask).toHaveBeenCalledWith('2026-10-24', 'Capture the next step'),
+			);
+		});
+
+		it.each(['project', 'focus'])(
+			'copies a dragged %s task into a positioned daily task without editing the project',
+			async (sourceKind) => {
+				const controller = createDailyController();
+				const vault = createVault({ '04_Projects/Pi.md': PROJECT_MARKDOWN });
+				const view = new TavernView({} as never, {
+					dailyLogs: controller,
+					saveSettings: vi.fn(),
+					vault,
+					settings: { boardTaskKeys: [], projectFolders: ['04_Projects'], tavernName: 'Tavern' },
+				});
+				await view.setState(
+					{ mode: 'note', selectedPath: '04_Projects/Pi.md' },
+					{ history: false },
+				);
+				const root = rootElements.at(-1)!;
+				if (sourceKind === 'focus') {
+					findByAriaLabel(root, 'Queue task')!.dispatch('click');
+					await view.setState({ boardPage: 'global' }, { history: false });
+					await vi.waitFor(() => expect(findByClass(root, 'tavern-focus-task')).toBeDefined());
+				}
+				await vi.waitFor(() =>
+					expect(findByAriaLabel(root, 'Mark Review log complete')).toBeDefined(),
+				);
+				let source = findByAriaLabel(root, 'Complete Build board')!.parent!;
+				if (sourceKind === 'focus') {
+					source = findByClass(root, 'tavern-focus-task')!;
+				}
+				const data = new Map<string, string>();
+				dragHandleFor(source).dispatch('dragstart', {
+					dataTransfer: { setData: (type: string, value: string) => data.set(type, value) },
+				});
+				const target = findByAriaLabel(root, 'Mark Review log complete')!.parent!;
+				const stopPropagation = vi.fn();
+				target.dispatch('drop', {
+					clientX: 70,
+					clientY: 15,
+					stopPropagation,
+					dataTransfer: { getData: (type: string) => data.get(type) ?? '' },
+				});
+				await vi.waitFor(() =>
+					expect(controller.copyProjectTask).toHaveBeenCalledWith(
+						'2026-10-24',
+						expect.objectContaining({ projectPath: '04_Projects/Pi.md', text: 'Build board' }),
+						{ taskId: 'block:review', placement: 'child' },
+					),
+				);
+				expect(stopPropagation).toHaveBeenCalled();
+				expect(controller.copyProjectTask).toHaveBeenCalledTimes(1);
+				expect(vault.modify).not.toHaveBeenCalled();
+			},
+		);
+
+		it('keeps a newer selected day visible when an earlier read finishes late', async () => {
+			const controller = createDailyController();
+			let resolveEarlier: (snapshot: DailyLogSnapshot) => void = () => {
+				throw new Error('Earlier read did not start.');
+			};
+			controller.read.mockImplementation(async (day) => {
+				if (day === '2026-10-23') {
+					// eslint-disable-next-line promise/avoid-new
+					return new Promise((resolve) => {
+						resolveEarlier = resolve;
+					});
+				}
+				return { day, path: day, note: parseDailyNote(DAILY_MARKDOWN) };
+			});
+			await dailyView(controller).onOpen();
+			const root = rootElements.at(-1)!;
+			findByAriaLabel(root, 'Previous day')!.dispatch('click');
+			findByAriaLabel(root, 'Next day')!.dispatch('click');
+			await vi.waitFor(() => expect(findByAriaLabel(root, 'Edit Review log')).toBeDefined());
+			resolveEarlier({ day: '2026-10-23', path: 'earlier', note: null });
+			await Promise.resolve();
+			await Promise.resolve();
+			expect(textValues(root)).not.toContain('No note');
+			expect(findByAriaLabel(root, 'Edit Review log')).toBeDefined();
+		});
+
+		it('reopens a linked Done task in place and routes its next completion through the link service', async () => {
+			const path = '04_Projects/Pi.md';
+			const files = {
+				[path]: '---\ntavern: project\n---\n# Pi\n## Done\n- [x] Linked task ^linked\n',
+			};
+			const settings = {
+				boardTaskKeys: [] as string[],
+				projectFolders: ['04_Projects'],
+				tavernName: 'Tavern',
+			};
+			const controller = {
+				...createDailyController(),
+				isLinked: (task: ProjectBoardTask) => task.id === 'block:linked',
+				setProjectTaskChecked: vi.fn(async (task: ProjectBoardTask, checked: boolean) => {
+					files[path] = await Effect.runPromise(
+						setProjectTaskChecked(files[path]!, task.id, checked),
+					);
+				}),
+			};
+			const view = new TavernView({} as never, {
+				dailyLogs: controller,
+				saveSettings: vi.fn(),
+				settings,
+				vault: createVault(files),
+			});
+			await view.setState({ mode: 'note', selectedPath: path }, { history: false });
+			const root = rootElements.at(-1)!;
+			const doneCheckbox = findByAriaLabel(root, 'Reopen Linked task')!;
+			expect(doneCheckbox.checked).toBe(true);
+			expect(doneCheckbox.disabled).toBe(false);
+			doneCheckbox.checked = false;
+			doneCheckbox.dispatch('change');
+			await vi.waitFor(() => {
+				const reopenedCheckbox = findByAriaLabel(root, 'Complete Linked task');
+				expect(reopenedCheckbox).not.toBe(doneCheckbox);
+				expect(reopenedCheckbox?.checked).toBe(false);
+			});
+			expect(controller.setProjectTaskChecked).toHaveBeenNthCalledWith(
+				1,
+				expect.objectContaining({ id: 'block:linked', sectionName: 'Done' }),
+				false,
+			);
+			expect(files[path]).toContain('## Done\n- [ ] Linked task ^linked');
+			findByAriaLabel(root, 'Queue task')!.dispatch('click');
+			await vi.waitFor(() => expect(settings.boardTaskKeys).toEqual([`${path}::block:linked`]));
+			await view.setState({ boardPage: 'global' }, { history: false });
+			expect(textValues(findByClass(root, 'tavern-focus-queue')!)).toContain('Linked task');
+			const availableCheckbox = findAllByAriaLabel(root, 'Complete Linked task').find((element) =>
+				element.parent?.classes.has('tavern-global-task'),
+			)!;
+			availableCheckbox.checked = true;
+			availableCheckbox.dispatch('change');
+			await vi.waitFor(() => expect(settings.boardTaskKeys).toEqual([]));
+			await vi.waitFor(() => expect(findByAriaLabel(root, 'Complete Linked task')).toBeUndefined());
+			expect(controller.setProjectTaskChecked).toHaveBeenNthCalledWith(
+				2,
+				expect.objectContaining({ id: 'block:linked', sectionName: 'Done' }),
+				true,
+			);
+			expect(files[path]).toContain('- [x] Linked task ^linked');
+		});
+
+		it('omits checked descendants from a selected parent and clears externally completed selections on refresh', async () => {
+			const path = '04_Projects/Pi.md';
+			const files = {
+				[path]:
+					'---\ntavern: project\n---\n# Pi\n## Backlog\n- [ ] Parent ^parent\n  - [x] Checked child ^checked\n  - [ ] Open child ^open\n',
+			};
+			const settings = {
+				boardTaskKeys: [`${path}::block:parent`, `${path}::block:open`],
+				projectFolders: ['04_Projects'],
+				tavernName: 'Tavern',
+			};
+			const view = new TavernView({} as never, {
+				saveSettings: vi.fn(),
+				settings,
+				vault: createVault(files),
+			});
+			await view.onOpen();
+			const root = rootElements.at(-1)!;
+			const queue = findByClass(root, 'tavern-focus-queue')!;
+			expect(textValues(queue)).toContain('Parent');
+			expect(textValues(queue)).toContain('Open child');
+			expect(textValues(queue)).not.toContain('Checked child');
+			files[path] = files[path]!.replace('- [ ] Parent ^parent', '- [x] Parent ^parent');
+			await view.refreshProjects();
+			expect(settings.boardTaskKeys).toEqual([]);
+			expect(findByClass(root, 'tavern-focus-task')).toBeUndefined();
+		});
+
+		it('filters visible daily tasks without changing source order and retains the filter after a shell refresh', async () => {
+			const controller = createDailyController();
+			const view = dailyView(controller);
+			await view.onOpen();
+			const root = rootElements.at(-1)!;
+			await vi.waitFor(() => expect(findByAriaLabel(root, 'Edit Review log')).toBeDefined());
+			const search = findByAriaLabel(root, 'Search log')!;
+			search.value = 'fu';
+			search.dispatch('input');
+			expect(findByAriaLabel(root, 'Edit Review log')).toBeUndefined();
+			expect(findByAriaLabel(root, 'Edit Follow up')).toBeDefined();
+			await view.refreshProjects();
+			await vi.waitFor(() => expect(findByAriaLabel(root, 'Edit Follow up')).toBeDefined());
+			expect(findByAriaLabel(root, 'Search log')?.value).toBe('fu');
+			const restoredSearch = findByAriaLabel(root, 'Search log')!;
+			restoredSearch.value = '';
+			restoredSearch.dispatch('input');
+			const daily = findByClass(root, 'tavern-daily-panel')!;
+			expect(
+				allElements(daily)
+					.filter((element) => element.attr['aria-label']?.startsWith('Edit '))
+					.map((element) => element.attr['aria-label']),
+			).toEqual(['Edit Review log', 'Edit Follow up']);
+			expect(controller.moveTask).not.toHaveBeenCalled();
+			expect(controller.editTask).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			{ placement: 'before', clientX: 70, clientY: 5 },
+			{ placement: 'after', clientX: 70, clientY: 25 },
+			{ placement: 'child', clientX: 70, clientY: 15 },
+			{ placement: 'after', clientX: 20, clientY: 15 },
+		])(
+			'moves a daily task using its handle and the $placement drop position at ($clientX, $clientY)',
+			async ({ placement, clientX, clientY }) => {
+				const controller = createDailyController();
+				await dailyView(controller).onOpen();
+				const root = rootElements.at(-1)!;
+				await vi.waitFor(() =>
+					expect(findByAriaLabel(root, 'Mark Follow up complete')).toBeDefined(),
+				);
+				const source = findByAriaLabel(root, 'Mark Follow up complete')!.parent!;
+				const target = findByAriaLabel(root, 'Mark Review log complete')!.parent!;
+				const data = new Map<string, string>();
+				const transfer = {
+					effectAllowed: '',
+					types: ['application/x-tavern-daily-task'],
+					setData: (type: string, value: string) => data.set(type, value),
+					getData: (type: string) => data.get(type) ?? '',
+				};
+				const handle = dragHandleFor(source);
+				expect(source.draggable).toBe(false);
+				expect(handle.draggable).toBe(true);
+				handle.dispatch('dragstart', { dataTransfer: transfer });
+				expect(JSON.parse(data.get('application/x-tavern-daily-task')!)).toEqual({
+					day: '2026-10-24',
+					taskId: 'block:follow',
+				});
+				expect(transfer.effectAllowed).toBe('move');
+				expect(source.classes.has('is-dragging-task')).toBe(true);
+				target.dispatch('drop', { clientX, clientY, dataTransfer: transfer });
+				handle.dispatch('dragend');
+				expect(source.classes.has('is-dragging-task')).toBe(false);
+				await vi.waitFor(() =>
+					expect(controller.moveTask).toHaveBeenCalledWith('2026-10-24', 'block:follow', {
+						taskId: 'block:review',
+						placement,
+					}),
+				);
+				expect(controller.copyProjectTask).not.toHaveBeenCalled();
+			},
+		);
+
+		it('cancels a daily drag without moving a task and distinguishes copy, move and unsupported drop feedback', async () => {
+			const controller = createDailyController();
+			await dailyView(controller).onOpen();
+			const root = rootElements.at(-1)!;
+			await vi.waitFor(() =>
+				expect(findByAriaLabel(root, 'Mark Review log complete')).toBeDefined(),
+			);
+			const row = findByAriaLabel(root, 'Mark Review log complete')!.parent!;
+			const handle = dragHandleFor(row);
+			handle.dispatch('dragstart', { dataTransfer: { setData: vi.fn() } });
+			handle.dispatch('dragend');
+			expect(row.classes.has('is-dragging-task')).toBe(false);
+			expect(controller.moveTask).not.toHaveBeenCalled();
+			const unsupported = vi.fn();
+			row.dispatch('dragover', {
+				preventDefault: unsupported,
+				dataTransfer: { types: ['text/uri-list'] },
+			});
+			expect(unsupported).not.toHaveBeenCalled();
+			expect(row.classes.has('is-drop-target')).toBe(false);
+			for (const [mime, expectedCursor] of [
+				['application/x-tavern-task-key', 'copy'],
+				['application/x-tavern-queue-key', 'copy'],
+				['application/x-tavern-daily-task', 'move'],
+			]) {
+				const transfer = { types: [mime], dropEffect: '' };
+				row.dispatch('dragover', { clientX: 70, clientY: 15, dataTransfer: transfer });
+				expect(transfer.dropEffect).toBe(expectedCursor);
+				expect(row.classes.has('is-drop-target')).toBe(true);
+				expect(row.classes.has('is-drop-child')).toBe(true);
+				row.dispatch('dragleave');
+				expect(row.classes.has('is-drop-target')).toBe(false);
+				expect(row.classes.has('is-drop-child')).toBe(false);
+			}
+		});
+
+		it.each([
+			['malformed JSON', '{'],
+			['null payload', 'null'],
+			['non-object payload', '42'],
+			['missing day', '{"taskId":"block:review"}'],
+			['missing task identity', '{"day":"2026-10-24"}'],
+			['non-text task identity', '{"day":"2026-10-24","taskId":42}'],
+			['another day', '{"day":"2026-10-23","taskId":"block:review"}'],
+		])('rejects a daily drop with %s without changing either note', async (_reason, raw) => {
+			const controller = createDailyController();
+			await dailyView(controller).onOpen();
+			const root = rootElements.at(-1)!;
+			await vi.waitFor(() =>
+				expect(findByAriaLabel(root, 'Mark Review log complete')).toBeDefined(),
+			);
+			const row = findByAriaLabel(root, 'Mark Review log complete')!.parent!;
+			row.dispatch('drop', { clientX: 70, clientY: 15, dataTransfer: { getData: () => raw } });
+			await Promise.resolve();
+			expect(controller.moveTask).not.toHaveBeenCalled();
+			expect(controller.copyProjectTask).not.toHaveBeenCalled();
+			if (raw === '{') {
+				expect(findByClass(root, 'tavern-daily-error')).toBeDefined();
+			}
+		});
+
+		it('requires a row target for daily reordering and clears hover feedback on an unrelated drop', async () => {
+			const controller = createDailyController();
+			await dailyView(controller).onOpen();
+			const root = rootElements.at(-1)!;
+			await vi.waitFor(() =>
+				expect(findByAriaLabel(root, 'Mark Review log complete')).toBeDefined(),
+			);
+			const content = findByClass(root, 'tavern-daily-content')!;
+			const transfer = {
+				types: ['application/x-tavern-daily-task'],
+				dropEffect: '',
+				getData: () => JSON.stringify({ day: '2026-10-24', taskId: 'block:review' }),
+			};
+			content.dispatch('dragover', { dataTransfer: transfer });
+			expect(content.classes.has('is-drop-target')).toBe(true);
+			content.dispatch('drop', { dataTransfer: transfer });
+			expect(content.classes.has('is-drop-target')).toBe(false);
+			const row = findByAriaLabel(root, 'Mark Review log complete')!.parent!;
+			row.dispatch('dragover', { clientX: 10, clientY: 5, dataTransfer: transfer });
+			expect(row.classes.has('is-drop-before')).toBe(true);
+			row.dispatch('drop', { dataTransfer: { getData: () => '' } });
+			expect(row.classes.has('is-drop-before')).toBe(false);
+			expect(row.classes.has('is-drop-target')).toBe(false);
+			expect(controller.moveTask).not.toHaveBeenCalled();
+			expect(controller.copyProjectTask).not.toHaveBeenCalled();
+		});
+
+		it('ignores blank capture, ordinary typing and an Enter used to compose text', async () => {
+			const controller = createDailyController();
+			await dailyView(controller).onOpen();
+			const root = rootElements.at(-1)!;
+			await vi.waitFor(() => expect(findByAriaLabel(root, 'Add todo')).toBeDefined());
+			const input = findByAriaLabel(root, 'Add todo')!;
+			input.value = '   ';
+			input.dispatch('keydown', { key: 'Enter' });
+			input.value = 'Still composing';
+			input.dispatch('keydown', { key: 'a' });
+			input.dispatch('keydown', { key: 'Enter', isComposing: true });
+			expect(controller.addTask).not.toHaveBeenCalled();
+			expect(input.disabled).toBe(false);
+			expect(input.value).toBe('Still composing');
+		});
+
+		it.each(['success', 'failure'])(
+			'ignores a late capture %s after the app closes',
+			async (outcome) => {
+				const { Notice } = await import('obsidian');
+				const controller = createDailyController();
+				let finishCapture: () => void = () => {
+					throw new Error('Capture did not start.');
+				};
+				// eslint-disable-next-line promise/avoid-new
+				const pending = new Promise<void>((resolve, reject) => {
+					finishCapture = resolve;
+					if (outcome === 'failure') {
+						finishCapture = () => reject(new Error('Late failure'));
+					}
+				});
+				controller.addTask.mockImplementation(() => pending);
+				const view = dailyView(controller);
+				await view.onOpen();
+				const root = rootElements.at(-1)!;
+				await vi.waitFor(() => expect(findByAriaLabel(root, 'Add todo')).toBeDefined());
+				const input = findByAriaLabel(root, 'Add todo')!;
+				input.value = 'Capture before closing';
+				input.dispatch('keydown', { key: 'Enter' });
+				expect(input.disabled).toBe(true);
+				await view.onClose();
+				const refresh = vi.spyOn(view, 'refreshProjects');
+				const noticesAtClose = vi.mocked(Notice).mock.calls.length;
+				const readsAtClose = controller.read.mock.calls.length;
+				finishCapture();
+				await Promise.allSettled([pending]);
+				await Promise.resolve();
+				expect(controller.read).toHaveBeenCalledTimes(readsAtClose);
+				expect(refresh).not.toHaveBeenCalled();
+				expect(Notice).toHaveBeenCalledTimes(noticesAtClose);
+				expect(findByClass(root, 'tavern-daily-error')).toBeUndefined();
+			},
+		);
+
+		it('shows a failed daily action without silently creating another note', async () => {
+			const { Notice } = await import('obsidian');
+			const controller = createDailyController();
+			controller.addTask.mockRejectedValueOnce(new Error('Vault is read-only'));
+			await dailyView(controller).onOpen();
+			const root = rootElements.at(-1)!;
+			await vi.waitFor(() => expect(findByAriaLabel(root, 'Add todo')).toBeDefined());
+			const input = findByAriaLabel(root, 'Add todo')!;
+			input.value = 'Keep my capture';
+			input.dispatch('keydown', { key: 'Enter' });
+			await vi.waitFor(() => expect(textValues(root)).toContain('Vault is read-only'));
+			expect(Notice).toHaveBeenCalledWith('Tavern: Vault is read-only');
+			expect(controller.create).not.toHaveBeenCalled();
+		});
 	});
 });

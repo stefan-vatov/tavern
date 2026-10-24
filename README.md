@@ -1,8 +1,8 @@
 # Tavern
 
 Tavern is a local-first app window backed by an Obsidian vault. Its project boards,
-task search, and cross-project focus queue live together in one Tavern interface.
-Task content stays in ordinary Markdown notes.
+task search, cross-project focus queue, and daily log live together in one Tavern
+interface. Task content stays in ordinary Markdown notes.
 
 ## Open Tavern
 
@@ -44,6 +44,33 @@ sections, with `Done` receiving completed tasks automatically.
 
 By default the project board scans `04_Projects`. Change the scanned folders in
 Tavern settings with a comma-separated list.
+
+## Daily Log
+
+The split view keeps the selected queue or project beside **Captain's Log**.
+Opening Tavern loads today's log using your local date, even if you last viewed
+another day. Use the date controls to browse other days or return to **Today**.
+If the selected day's note is missing, Tavern shows **No note** and **Create daily
+log**; it never substitutes an older note or creates one automatically.
+
+Daily notes live at `02_Daily_Log/Daily_Log/YYYY/MM/YYYY-MM-DD.md` by default.
+Change the base folder in Tavern settings. **Create daily log** makes a plain
+Markdown note with `General`, `Plan`, and `Notes` headings. Existing notes keep
+their content. You can search, edit, check, add, reorder, and nest tasks in the
+log.
+
+Drag a task's handle from the global or focus queue into the daily log to copy
+it, including its nested tasks. The source stays in its project. Tavern adds
+standard Obsidian block IDs, such as `^tavern-a1b2`, to the linked task lines and
+saves their relationships in plugin settings. Checking or unchecking either
+copy updates the corresponding task in the other note, including changes made
+in Obsidian's Markdown editor. Task text remains independently editable.
+
+Completing a linked task moves its project source to `Done` and removes it from
+the open queues. Unchecking reopens it in its current project section; it does
+not restore a previous focus-queue selection. Keep the block IDs when editing
+linked tasks. If a note or ID is missing or duplicated, Tavern reports the
+problem instead of matching a task by its text.
 
 ## Development
 

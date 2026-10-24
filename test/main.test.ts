@@ -4,6 +4,9 @@ import { Platform } from 'obsidian';
 import TavernPlugin from '../src/main';
 import { TavernView } from '../src/view';
 import { TAVERN_VIEW_TYPE } from '../src/project-mode';
+import type { DailyLogController } from '../src/daily-log-controller';
+import type { DailyTaskLink } from '../src/daily-log-service';
+import type { ProjectVaultFile } from '../src/project-vault';
 
 const { noticeMock } = vi.hoisted(() => ({ noticeMock: vi.fn() }));
 vi.mock('obsidian', () => ({
@@ -72,7 +75,7 @@ const setup = () => {
 	};
 	const metadata = { on: vi.fn() };
 	const fileManager = { processFrontMatter: vi.fn() };
-	plugin.app = { workspace, metadataCache: metadata, fileManager, vault: {} } as never;
+	plugin.app = { workspace, metadataCache: metadata, fileManager, vault: { on: vi.fn() } } as never;
 	plugin.settings = { boardTaskKeys: [], projectFolders: ['04_Projects'], tavernName: 'Tavern' };
 	plugin.loadData = vi.fn(async () => ({}));
 	plugin.saveData = vi.fn();
@@ -84,6 +87,78 @@ const setup = () => {
 	plugin.addCommand = vi.fn();
 	plugin.addSettingTab = vi.fn();
 	return { plugin, leaf, leaves, workspace, metadata, fileManager };
+};
+
+const linkedSourcePath = '04_Projects/Linked.md';
+const linkedDailyPath = 'Daily/2026/10/2026-10-24.md';
+const linkedDay = '2026-10-24';
+
+const setupLinkedTasks = async () => {
+	const state = setup();
+	const files = new Map([
+		[linkedSourcePath, '---\ntavern: project\n---\n## Work\n- [ ] Source ^source-task\n'],
+		[linkedDailyPath, '## General\n### Plan\n- [ ] Daily copy ^copy-task\n'],
+	]);
+	const contents = (path: string): string => {
+		const markdown = files.get(path);
+		if (markdown === undefined) {
+			throw new Error(`Missing file: ${path}`);
+		}
+		return markdown;
+	};
+	const vault = {
+		on: vi.fn(),
+		getMarkdownFiles: () => [...files.keys()].map((path) => ({ path })),
+		getAbstractFileByPath: (path: string) => {
+			if (files.has(path)) {
+				return { path };
+			}
+			return null;
+		},
+		read: async (file: ProjectVaultFile) => contents(file.path),
+		modify: async (file: ProjectVaultFile, markdown: string) => {
+			files.set(file.path, markdown);
+		},
+		process: vi.fn(async (file: ProjectVaultFile, transform: (markdown: string) => string) => {
+			const markdown = transform(contents(file.path));
+			files.set(file.path, markdown);
+			return markdown;
+		}),
+		create: async (path: string, markdown: string) => {
+			files.set(path, markdown);
+			return { path };
+		},
+		createFolder: vi.fn(),
+	};
+	const links: DailyTaskLink[] = [
+		{
+			source: { path: linkedSourcePath, blockId: 'source-task' },
+			copies: [{ path: linkedDailyPath, blockId: 'copy-task' }],
+			checked: false,
+		},
+	];
+	state.plugin.app = { ...state.plugin.app, vault } as never;
+	vi.mocked(state.plugin.loadData).mockResolvedValue({
+		dailyLogFolder: 'Daily',
+		dailyTaskLinks: links,
+		boardTaskKeys: [`${linkedSourcePath}::block:source-task`, '04_Projects/Other.md::other'],
+	});
+	await state.plugin.onload();
+	const [, creator] = vi.mocked(state.plugin.registerView).mock.calls[0]!;
+	const view = creator(state.leaf as never) as TavernView;
+	const refresh = vi.spyOn(view, 'refreshProjects').mockResolvedValue();
+	state.leaf.view = view;
+	state.leaves.push(state.leaf);
+	const controller = (view as unknown as { deps: { dailyLogs: DailyLogController } }).deps
+		.dailyLogs;
+	const changed = state.metadata.on.mock.calls.find(([name]) => name === 'changed')![1] as (file: {
+		path: string;
+	}) => void;
+	const renamed = vault.on.mock.calls.find(([name]) => name === 'rename')![1] as (
+		file: { path: string },
+		oldPath: string,
+	) => void;
+	return { ...state, files, vault, links, refresh, controller, changed, renamed };
 };
 
 beforeEach(() => {
@@ -316,7 +391,7 @@ describe('Tavern app window', () => {
 		await plugin.onload();
 		const changed = metadata.on.mock.calls[0]![1] as (file: unknown) => void;
 		changed({ path: '04_Projects/New.md' });
-		expect(refresh).toHaveBeenCalledOnce();
+		await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce());
 		changed(null);
 		leaves.length = 0;
 		changed({ path: '04_Projects/New.md' });
@@ -358,10 +433,114 @@ describe('Tavern app window', () => {
 		expect(plugin.settings).toEqual({
 			availableTasksCollapsed: false,
 			boardTaskKeys: [],
+			dailyLogFolder: '02_Daily_Log/Daily_Log',
+			dailyTaskLinks: [],
 			projectFolders: ['Projects'],
 			sidebarCollapsedSections: [],
 			tavernName: 'Tavern',
 		});
 		expect(plugin.saveData).toHaveBeenCalledWith(plugin.settings);
+	});
+});
+
+describe('daily task plugin events', () => {
+	it.each([linkedSourcePath, linkedDailyPath])(
+		'synchronizes editor checkbox changes in %s before refreshing a live view',
+		async (path) => {
+			const state = await setupLinkedTasks();
+			const refreshed: { source: string; copy: string; checked: boolean }[] = [];
+			state.files.set(path, state.files.get(path)!.replace('- [ ]', '- [x]'));
+			state.refresh.mockImplementation(async () => {
+				refreshed.push({
+					source: state.files.get(linkedSourcePath)!,
+					copy: state.files.get(linkedDailyPath)!,
+					checked: state.plugin.settings.dailyTaskLinks![0]!.checked,
+				});
+			});
+			state.changed({ path });
+			await vi.waitFor(() => expect(state.refresh).toHaveBeenCalledOnce());
+			expect(refreshed).toEqual([
+				{
+					source: expect.stringContaining('- [x] Source ^source-task'),
+					copy: expect.stringContaining('- [x] Daily copy ^copy-task'),
+					checked: true,
+				},
+			]);
+			expect(state.files.get(linkedSourcePath)).toMatch(/## Done\n+- \[x\] Source/);
+			expect(state.plugin.saveData).toHaveBeenCalledWith(
+				expect.objectContaining({
+					dailyTaskLinks: [expect.objectContaining({ checked: true })],
+				}),
+			);
+			expect(noticeMock).not.toHaveBeenCalled();
+		},
+	);
+
+	it('persists renamed source endpoints and focus references before refreshing the view', async () => {
+		const state = await setupLinkedTasks();
+		const renamedPath = '04_Projects/Renamed.md';
+		const refreshed: { sourcePath: string; focused: string[] }[] = [];
+		state.files.set(renamedPath, state.files.get(linkedSourcePath)!);
+		state.files.delete(linkedSourcePath);
+		state.refresh.mockImplementation(async () => {
+			refreshed.push({
+				sourcePath: state.plugin.settings.dailyTaskLinks![0]!.source.path,
+				focused: [...state.plugin.settings.boardTaskKeys],
+			});
+		});
+		state.renamed({ path: renamedPath }, linkedSourcePath);
+		await vi.waitFor(() => expect(state.refresh).toHaveBeenCalledOnce());
+		expect(refreshed).toEqual([
+			{
+				sourcePath: renamedPath,
+				focused: [`${renamedPath}::block:source-task`, '04_Projects/Other.md::other'],
+			},
+		]);
+		expect(state.plugin.saveData).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				dailyTaskLinks: [
+					expect.objectContaining({ source: { path: renamedPath, blockId: 'source-task' } }),
+				],
+			}),
+		);
+		expect(state.plugin.settings.dailyTaskLinks![0]!.copies).toEqual(state.links[0]!.copies);
+	});
+
+	it('reports an unresolved editor link and refreshes without changing the other note', async () => {
+		const state = await setupLinkedTasks();
+		const source = `${state.files.get(linkedSourcePath)!}- [ ] Collision ^source-task\n`;
+		state.files.set(linkedSourcePath, source);
+		state.files.set(linkedDailyPath, state.files.get(linkedDailyPath)!.replace('- [ ]', '- [x]'));
+		state.changed({ path: linkedDailyPath });
+		await vi.waitFor(() => expect(state.refresh).toHaveBeenCalledOnce());
+		expect(noticeMock).toHaveBeenCalledWith(expect.stringContaining('missing or ambiguous'));
+		expect(state.files.get(linkedSourcePath)).toBe(source);
+		expect(state.vault.process).not.toHaveBeenCalled();
+		expect(state.plugin.settings.dailyTaskLinks).toEqual(state.links);
+	});
+
+	it('stops queued editor synchronization and view refresh when the plugin unloads', async () => {
+		const state = await setupLinkedTasks();
+		const source = state.files.get(linkedSourcePath);
+		state.files.set(linkedDailyPath, state.files.get(linkedDailyPath)!.replace('- [ ]', '- [x]'));
+		state.changed({ path: linkedDailyPath });
+		state.plugin.onunload();
+		await expect(state.controller.read(linkedDay)).rejects.toThrow('disposed');
+		expect(state.files.get(linkedSourcePath)).toBe(source);
+		expect(state.vault.process).not.toHaveBeenCalled();
+		expect(state.refresh).not.toHaveBeenCalled();
+		expect(noticeMock).not.toHaveBeenCalled();
+	});
+
+	it('retains the saved registry in memory when a controller action cannot persist changed links', async () => {
+		const state = await setupLinkedTasks();
+		vi.mocked(state.plugin.saveData).mockRejectedValueOnce(new Error('Settings write failed.'));
+		await expect(
+			state.controller.setTaskChecked(linkedDay, 'block:copy-task', true),
+		).rejects.toThrow('Settings write failed.');
+		expect(state.plugin.settings.dailyTaskLinks).toEqual(state.links);
+		expect(state.plugin.settings.dailyTaskLinks![0]!.checked).toBe(false);
+		expect(state.files.get(linkedSourcePath)).toContain('- [x] Source ^source-task');
+		expect(state.files.get(linkedDailyPath)).toContain('- [x] Daily copy ^copy-task');
 	});
 });

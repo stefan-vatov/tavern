@@ -61,6 +61,29 @@ describe('project board model', () => {
 		expect(addTaskToFocusQueue(['a'], '')).toEqual(['a']);
 	});
 
+	it('keeps completed descendants out of the focus queue when their parent is selected', () => {
+		const library = Effect.runSync(
+			buildProjectLibrary({
+				files: [
+					{
+						markdown:
+							'---\ntavern: project\n---\n## Plan\n- [ ] Parent\n  - [x] Finished child\n  - [ ] Open child\n',
+						path: '04_Projects/Pi.md',
+					},
+				],
+				folders: ['04_Projects'],
+			}),
+		);
+		const [parent] = projectTasks(library);
+		const model = createProjectBoardModel({
+			boardTaskKeys: [taskSelectionKey(parent)],
+			library,
+			query: '',
+			selectedPath: '',
+		});
+		expect(model.focusTasks.map((task) => task.text)).toEqual(['Parent', 'Open child']);
+	});
+
 	it('should select the first project when selected path is unavailable', () => {
 		const library = Effect.runSync(
 			buildProjectLibrary({

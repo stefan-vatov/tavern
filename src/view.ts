@@ -2,6 +2,8 @@
 import { Effect, Exit } from 'effect';
 import { Component, ItemView, Menu, Notice, Scope, setIcon, type WorkspaceLeaf } from 'obsidian';
 import { addTaskToFocusQueue, createProjectBoardModel } from './project-board-model';
+import type { DailyLogController } from './daily-log-controller';
+import DailyLogPane from './daily-log-pane';
 import {
 	filterTasks,
 	projectTasks,
@@ -51,9 +53,15 @@ type SidebarProjectSection = {
 };
 
 type TavernViewDeps = {
+	dailyLogs?: DailyLogController;
 	saveSettings: () => Promise<void>;
 	settings: TavernSettings;
 	vault: ProjectVault;
+};
+
+type TaskTextEditorOptions = {
+	task?: ProjectBoardTask;
+	onSave?: (text: string) => Promise<void>;
 };
 
 type TavernViewState = {
@@ -70,6 +78,9 @@ type TavernViewState = {
 type TavernBoardPage = 'global' | 'project';
 
 class TavernView extends ItemView {
+	private dailyPane: DailyLogPane | undefined;
+	private dailyDay: string;
+	private dailyQuery = '';
 	private dragCleanup: (() => void) | null = null;
 	private errorMessage: string | null = null;
 	private library: ProjectLibrary = EMPTY_LIBRARY;
@@ -93,6 +104,7 @@ class TavernView extends ItemView {
 		private readonly deps: TavernViewDeps,
 	) {
 		super(leaf);
+		this.dailyDay = deps.dailyLogs?.today() ?? '';
 		this.availableTasksCollapsed = deps.settings.availableTasksCollapsed ?? false;
 		this.sidebarCollapsedSections = new Set(deps.settings.sidebarCollapsedSections ?? []);
 	}
@@ -110,6 +122,13 @@ class TavernView extends ItemView {
 	}
 
 	async onOpen(): Promise<void> {
+		this.closed = false;
+		this.dailyDay = this.deps.dailyLogs?.today() ?? '';
+		try {
+			await this.deps.dailyLogs?.syncAll?.();
+		} catch (error) {
+			new Notice(`Tavern: ${String(error)}`);
+		}
 		this.register(this.contentEl.onWindowMigrated(() => this.dragCleanup?.()));
 		this.renderShell();
 		await this.refreshProjects();
@@ -119,6 +138,10 @@ class TavernView extends ItemView {
 		// eslint-disable-next-line eslint/no-underscore-dangle
 		// eslint-disable-next-line eslint/no-underscore-dangle
 		this.closed = true;
+		if (this.dailyPane) {
+			this.removeChild(this.dailyPane);
+			this.dailyPane = undefined;
+		}
 		this.popSearchOverlayScope();
 		this.dragCleanup?.();
 		this.dragCleanup = null;
@@ -205,11 +228,17 @@ class TavernView extends ItemView {
 
 		// Always prune stale boardTaskKeys on refresh (after any mutation or external edit). Uses Map/filter-equivalent logic (like selectedProjectTasks) to drop keys no longer resolving to live tasks post-renumber (text/line/section changes baked in createTaskId). Prevents bloat and surprise drops from persisted focus queue. Migration for text edits (see editTask) re-inserts surviving keys after prune.
 		/* c8 ignore next -- prune + migration branches exercised in integration but add branch coverage here; core paths covered */
+		const tasks = projectTasks(this.library);
+		const completedTreeKeys = new Set(
+			tasks.filter((task) => task.checked).flatMap((task) => taskTreeKeys(tasks, task)),
+		);
 		const currentTaskKeys = new Set(
-			projectTasks(this.library).map((task) => taskSelectionKey(task)),
+			tasks.filter((task) => !task.checked).map((task) => taskSelectionKey(task)),
 		);
 		const originalBoardTaskKeys = this.deps.settings.boardTaskKeys;
-		const prunedBoardTaskKeys = originalBoardTaskKeys.filter((key) => currentTaskKeys.has(key));
+		const prunedBoardTaskKeys = originalBoardTaskKeys.filter(
+			(key) => currentTaskKeys.has(key) && !completedTreeKeys.has(key),
+		);
 		if (prunedBoardTaskKeys.length !== originalBoardTaskKeys.length) {
 			await this.updateBoardTaskKeys(prunedBoardTaskKeys);
 		}
@@ -234,6 +263,10 @@ class TavernView extends ItemView {
 			return;
 		}
 		this.dragCleanup?.();
+		if (this.dailyPane) {
+			this.removeChild(this.dailyPane);
+			this.dailyPane = undefined;
+		}
 		this.contentEl.empty();
 		this.contentEl.addClass('tavern-container');
 		this.contentEl.removeClass('is-sidebar-open');
@@ -253,6 +286,40 @@ class TavernView extends ItemView {
 			this.renderDetail(detailEl);
 		});
 		this.renderDetail(detailEl);
+		if (this.deps.dailyLogs) {
+			this.renderDailyLog();
+		}
+	}
+
+	private renderDailyLog(): void {
+		const controller = this.deps.dailyLogs;
+		if (!controller) {
+			return;
+		}
+		this.contentEl.addClass('tavern-has-daily-log');
+		const panel = this.contentEl.createDiv('tavern-panel tavern-daily-panel');
+		this.dailyPane = this.addChild(
+			new DailyLogPane(panel, controller, {
+				day: this.dailyDay,
+				query: this.dailyQuery,
+				onStateChange: ({ day, query }) => {
+					this.dailyDay = day;
+					this.dailyQuery = query;
+				},
+				onChanged: () => this.refreshProjects(),
+				projectTaskFromDrop: (event) => {
+					const key =
+						event.dataTransfer?.getData(TASK_QUEUE_KEY_MIME) ||
+						event.dataTransfer?.getData(QUEUE_KEY_MIME) ||
+						'';
+					return this.taskFromSelectionKey(key);
+				},
+				renderTaskText: (container, text, onSave) => {
+					this.renderEditableTaskText(container, text, { onSave });
+				},
+			}),
+		);
+		void this.dailyPane.refresh();
 	}
 
 	private renderList(containerEl: HTMLElement, onQueryChange: () => void): void {
@@ -513,7 +580,7 @@ class TavernView extends ItemView {
 		});
 
 		const content = row.createSpan('tavern-global-task-content');
-		this.renderEditableTaskText(content, task, task.text);
+		this.renderEditableTaskText(content, task.text, { task });
 		content.createSpan({
 			cls: 'tavern-global-task-project',
 			text: `${task.projectTitle} / ${task.sectionName}`,
@@ -921,19 +988,26 @@ class TavernView extends ItemView {
 			this.showTaskContextMenu(event, boardTask);
 		});
 
+		const linked = boardTask && this.deps.dailyLogs?.isLinked?.(boardTask);
+		let checkboxLabel = `Complete ${task.text}`;
+		if (linked && task.checked) {
+			checkboxLabel = `Reopen ${task.text}`;
+		}
 		const checkbox = taskEl.createEl('input', {
-			attr: { 'aria-label': `Complete ${task.text}` },
+			attr: { 'aria-label': checkboxLabel },
 			type: 'checkbox',
 		});
 		checkbox.checked = task.checked;
-		checkbox.disabled = task.checked && task.sectionName === DONE_SECTION_NAME;
+		checkbox.disabled = task.checked && task.sectionName === DONE_SECTION_NAME && !linked;
 		this.registerDomEvent(checkbox, 'change', () => {
 			if (checkbox.checked) {
 				void this.completeTask(boardTask);
+			} else if (linked && boardTask) {
+				void this.setLinkedTaskChecked(boardTask, false);
 			}
 		});
 
-		this.renderEditableTaskText(taskEl, boardTask, task.text);
+		this.renderEditableTaskText(taskEl, task.text, { task: boardTask });
 
 		this.renderTaskPin(taskEl, boardTask);
 		const reorder = taskEl.createSpan('tavern-project-task-reorder');
@@ -968,7 +1042,7 @@ class TavernView extends ItemView {
 		});
 
 		const content = row.createSpan('tavern-global-task-content');
-		this.renderEditableTaskText(content, task, task.text);
+		this.renderEditableTaskText(content, task.text, { task });
 		content.createSpan({ cls: 'tavern-global-task-project', text: task.projectTitle });
 
 		this.renderTaskPin(row, task);
@@ -1040,8 +1114,8 @@ class TavernView extends ItemView {
 
 	private renderEditableTaskText(
 		containerEl: HTMLElement,
-		task: ProjectBoardTask | undefined,
 		text: string,
+		options: TaskTextEditorOptions,
 	): void {
 		const labelText = text || 'Untitled task';
 		const label = containerEl.createEl('span', {
@@ -1057,7 +1131,7 @@ class TavernView extends ItemView {
 		const openEditor = (event?: Event) => {
 			event?.preventDefault();
 			event?.stopPropagation();
-			this.renderTaskTextEditor(label, task, text);
+			this.renderTaskTextEditor(label, text, options);
 		};
 
 		this.registerDomEvent(label, 'click', openEditor);
@@ -1095,8 +1169,8 @@ class TavernView extends ItemView {
 
 	private renderTaskTextEditor(
 		containerEl: HTMLElement,
-		task: ProjectBoardTask | undefined,
 		text: string,
+		{ task, onSave }: TaskTextEditorOptions,
 	): void {
 		containerEl.empty();
 		containerEl.addClass('is-editing');
@@ -1118,7 +1192,11 @@ class TavernView extends ItemView {
 				void this.refreshProjects();
 				return;
 			}
-			void this.editTask(task, nextText);
+			if (onSave) {
+				void onSave(nextText);
+			} else {
+				void this.editTask(task, nextText);
+			}
 		};
 		const cancel = () => {
 			if (committed) {
@@ -1210,6 +1288,10 @@ class TavernView extends ItemView {
 	}
 
 	private async completeTask(task: ProjectBoardTask | undefined): Promise<void> {
+		if (task && this.deps.dailyLogs?.isLinked?.(task)) {
+			await this.setLinkedTaskChecked(task, true);
+			return;
+		}
 		const exit = await Effect.runPromiseExit(completeVaultProjectTask(this.deps.vault, task));
 		if (Exit.isFailure(exit)) {
 			new Notice('Tavern could not complete the task.');
@@ -1219,6 +1301,18 @@ class TavernView extends ItemView {
 			return;
 		}
 		await this.removeTaskSelection(task);
+		await this.refreshProjects();
+	}
+
+	private async setLinkedTaskChecked(task: ProjectBoardTask, checked: boolean): Promise<void> {
+		try {
+			await this.deps.dailyLogs?.setProjectTaskChecked?.(task, checked);
+			if (checked) {
+				await this.removeTaskSelection(task);
+			}
+		} catch (error) {
+			new Notice(`Tavern: ${String(error)}`);
+		}
 		await this.refreshProjects();
 	}
 
@@ -1448,7 +1542,7 @@ class TavernView extends ItemView {
 				}
 			});
 			const content = row.createSpan('tavern-focus-task-content');
-			this.renderEditableTaskText(content, task, task.text);
+			this.renderEditableTaskText(content, task.text, { task });
 			content.createSpan({ cls: 'tavern-focus-task-project', text: task.projectTitle });
 			const removeButton = row.createEl('button', {
 				cls: 'tavern-project-task-pin tavern-queue-toggle tavern-queue-toggle-remove',

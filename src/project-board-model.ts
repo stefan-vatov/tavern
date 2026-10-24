@@ -30,7 +30,9 @@ const createProjectBoardModel = (input: ProjectBoardModelInput): ProjectBoardMod
 	const tasks = projectTasks(input.library);
 	return {
 		doneTaskCount: tasks.filter((task) => task.checked).length,
-		focusTasks: selectedProjectTasks(input.library, input.boardTaskKeys),
+		focusTasks: selectedProjectTasks(input.library, input.boardTaskKeys).filter(
+			(task) => !task.checked,
+		),
 		openTaskCount: tasks.filter((task) => !task.checked).length,
 		selectedProject: selectedProject(input.library, input.selectedPath),
 		visibleProjects: filterProjects(input.library, input.query),
