@@ -169,6 +169,84 @@ describe('daily log Markdown', () => {
 		).toBe(`### Plan\n${tasks}### Notes\nNarrative`);
 	});
 
+	it.each([
+		{
+			name: 'spaces parent and mixed child',
+			targetIndent: '    ',
+			existingIndent: '\t  ',
+			childIndent: '\t  ',
+		},
+		{
+			name: 'tab parent and spaces child',
+			targetIndent: '\t',
+			existingIndent: '      ',
+			childIndent: '      ',
+		},
+		{
+			name: 'four-space parent without children',
+			targetIndent: '    ',
+			existingIndent: undefined,
+			childIndent: '    \t',
+		},
+		{
+			name: 'tab parent without children',
+			targetIndent: '\t',
+			existingIndent: undefined,
+			childIndent: '\t\t',
+		},
+		{
+			name: 'two-space parent without children',
+			targetIndent: '  ',
+			existingIndent: undefined,
+			childIndent: '    ',
+		},
+		{
+			name: 'unindented parent without children',
+			targetIndent: '',
+			existingIndent: undefined,
+			childIndent: '  ',
+		},
+	] as const)(
+		'nests moved and copied trees using the destination child level: $name',
+		({ targetIndent, existingIndent, childIndent }) => {
+			const source =
+				'\t- [ ] Imported ^imported\r\n\t  Supporting prose.\r\n\t  - [x] Nested ^nested';
+			const existing: string[] = [];
+			if (existingIndent !== undefined) {
+				existing.push(`${existingIndent}- [ ] Existing ^existing`);
+			}
+			const destination = [
+				'- [ ] Outer ^outer',
+				`${targetIndent}- [ ] Target ^target`,
+				...existing,
+				'### Notes',
+				'Narrative',
+			].join('\r\n');
+			const expected = [
+				'### Plan',
+				'- [ ] Outer ^outer',
+				`${targetIndent}- [ ] Target ^target`,
+				`${childIndent}- [ ] Imported ^imported`,
+				`${childIndent}  Supporting prose.`,
+				`${childIndent}  - [x] Nested ^nested`,
+				...existing,
+				'### Notes',
+				'Narrative',
+			].join('\r\n');
+			expect
+				.soft(moveDailyTask(`### Plan\r\n${source}\r\n${destination}`, 1, 5, 'child'))
+				.toBe(expected);
+			expect
+				.soft(
+					insertDailyTaskTree(`### Plan\r\n${destination}`, source, {
+						lineIndex: 2,
+						placement: 'child',
+					}),
+				)
+				.toBe(expected);
+		},
+	);
+
 	it('rejects non-task destinations and sources rather than inserting raw text as note structure', () => {
 		const note = '### Plan\n- [ ] Target\n### Notes\nNarrative';
 		expect(() =>

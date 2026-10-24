@@ -27,6 +27,7 @@ import {
 } from './project-vault';
 import { TAVERN_VIEW_TYPE } from './project-mode';
 import type { TavernSettings } from './settings-defaults';
+import { taskDropPlacement, taskNestingDepth } from './task-drag';
 
 const LIST_RESIZE = {
 	cssVar: '--tavern-list-width',
@@ -39,8 +40,6 @@ const TASK_ID_MIME = 'text/plain';
 const TASK_QUEUE_KEY_MIME = 'application/x-tavern-task-key';
 const QUEUE_KEY_MIME = 'application/x-tavern-queue-key';
 const DAILY_SOURCE_MIME = 'application/x-tavern-daily-source';
-const NEST_TASK_OFFSET = 63;
-const TASK_DROP_EDGE_RATIO = 0.33;
 
 type ResizeConfig = {
 	cssVar: string;
@@ -997,7 +996,7 @@ class TavernView extends ItemView {
 			this.clearTaskDropTarget(taskEl);
 			const sourceTask = this.projectTaskFromDrop(project.path, event);
 			if (sourceTask) {
-				void this.moveTaskToPosition(sourceTask, boardTask, this.taskDropPlacement(taskEl, event));
+				void this.moveTaskToPosition(sourceTask, boardTask, taskDropPlacement(taskEl, event));
 			}
 		});
 		this.registerDomEvent(taskEl, 'contextmenu', (event) => {
@@ -1066,7 +1065,7 @@ class TavernView extends ItemView {
 	}
 
 	private applyTaskNesting(containerEl: HTMLElement, task: ProjectTask): void {
-		const depth = this.taskNestingDepth(task);
+		const depth = taskNestingDepth(task.indent);
 		containerEl.style.setProperty('--tavern-task-depth', `${depth}`);
 		if (depth > 0) {
 			containerEl.addClass('is-nested');
@@ -1101,20 +1100,6 @@ class TavernView extends ItemView {
 		if (indentWidth(task.indent) === 0) {
 			event.dataTransfer?.setData(DAILY_SOURCE_MIME, taskSelectionKey(task));
 		}
-	}
-
-	private taskNestingDepth(task: ProjectTask): number {
-		let spaces = 0;
-		let tabs = 0;
-		for (const character of task.indent) {
-			if (character === '\t') {
-				tabs += 1;
-			} else {
-				spaces += 1;
-			}
-		}
-
-		return tabs + Math.floor(spaces / 2);
 	}
 
 	private renderTaskPin(containerEl: HTMLElement, task: ProjectBoardTask | undefined): void {
@@ -1707,31 +1692,13 @@ class TavernView extends ItemView {
 		target.removeClass('is-drop-before');
 		target.removeClass('is-drop-after');
 		target.removeClass('is-drop-child');
-		target.addClass(`is-drop-${this.taskDropPlacement(target, event)}`);
+		target.addClass(`is-drop-${taskDropPlacement(target, event)}`);
 	}
 
 	private clearTaskDropTarget(target: HTMLElement): void {
 		target.removeClass('is-drop-before');
 		target.removeClass('is-drop-after');
 		target.removeClass('is-drop-child');
-	}
-
-	private taskDropPlacement(target: HTMLElement, event: DragEvent): 'after' | 'before' | 'child' {
-		const rect = target.getBoundingClientRect();
-		const relativeY = event.clientY - rect.top;
-		if (relativeY <= rect.height * TASK_DROP_EDGE_RATIO) {
-			return 'before';
-		}
-		if (relativeY >= rect.height * (1 - TASK_DROP_EDGE_RATIO)) {
-			return 'after';
-		}
-		const depth = Number(target.style.getPropertyValue('--tavern-task-depth')) || 0;
-		const nestOffset = NEST_TASK_OFFSET + Math.min(depth * 24, 192);
-		if (event.clientX - rect.left >= nestOffset) {
-			return 'child';
-		}
-
-		return 'after';
 	}
 
 	private markReorderTarget(event: DragEvent, target: HTMLElement): void {

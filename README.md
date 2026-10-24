@@ -57,8 +57,10 @@ Daily notes live at `02_Daily_Log/Daily_Log/YYYY/MM/YYYY-MM-DD.md` by default.
 Change the base folder in Tavern settings. **Create daily log** makes a plain
 Markdown note with `General`, `Plan`, and `Notes` headings. Existing notes keep
 their content. You can search, edit, check, add, reorder, and nest tasks in the
-log. Tasks written directly in a daily note can be checked and unchecked without
-belonging to a project or queue. Checking a task keeps the log and unfinished
+log. Dragging within the log works like the project side: drop near a row's top
+or bottom edge to reorder, or over its middle to the right to make a subitem.
+Moving a parent carries its whole group. Tasks written directly in a daily note
+can be checked and unchecked without belonging to a project or queue. Checking a task keeps the log and unfinished
 entries in place while the queues update.
 
 Drag a task's handle from the global or focus queue into the daily log to copy

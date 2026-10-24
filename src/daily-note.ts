@@ -212,6 +212,13 @@ function indentWidth(indent: string): number {
 	return indent.replace(/\t/g, '    ').length;
 }
 
+function childIndent(target: DailyTask, child?: DailyTask): string {
+	return (
+		child?.indent ??
+		target.indent + (target.indent.endsWith('\t') || target.indent.endsWith('    ') ? '\t' : '  ')
+	);
+}
+
 function taskEnd(lines: MarkdownLine[], task: DailyTask, tasks: DailyTask[]): number {
 	const byLine = new Map(tasks.map((candidate) => [candidate.lineIndex, candidate]));
 	const width = indentWidth(task.indent);
@@ -263,11 +270,7 @@ function moveDailyTask(
 		insertIndex = targetLine + 1;
 	}
 	const child = tasks.find((task) => task.lineIndex > targetLine && task.lineIndex < targetEnd);
-	let childUnit = source.indent.includes('\t') || target.indent.includes('\t') ? '\t' : '  ';
-	if (child) {
-		childUnit = child.indent.slice(target.indent.length);
-	}
-	const indent = placement === 'child' ? target.indent + childUnit : target.indent;
+	const indent = placement === 'child' ? childIndent(target, child) : target.indent;
 	const group = lines.splice(sourceLine, end - sourceLine);
 	for (const line of group) {
 		if (!line.raw.trim()) {
@@ -318,9 +321,7 @@ function insertDailyTaskTree(
 			const child = tasks.find(
 				(candidate) => candidate.lineIndex > task.lineIndex && candidate.lineIndex < end,
 			);
-			const unit =
-				child?.indent.slice(task.indent.length) ?? (task.indent.includes('\t') ? '\t' : '  ');
-			indent += unit;
+			indent = childIndent(task, child);
 		}
 	}
 	const raws = sourceLines.map(({ raw }) => {

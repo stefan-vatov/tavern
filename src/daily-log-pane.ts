@@ -1,13 +1,9 @@
 /* eslint-disable eslint/max-statements, eslint/no-magic-numbers, eslint/no-ternary */
 import { Component, Notice, setIcon } from 'obsidian';
 import type { DailyLogController, DailyLogDropTarget } from './daily-log-controller';
-import {
-	shiftDay,
-	type DailyNote,
-	type DailyTask,
-	type DailyTaskDropPlacement,
-} from './daily-note';
+import { shiftDay, type DailyNote, type DailyTask } from './daily-note';
 import { filterTasks, type ProjectBoardTask } from './project-library';
+import { taskDropPlacement, taskNestingDepth } from './task-drag';
 
 interface DailyLogPaneOptions {
 	day: string;
@@ -24,6 +20,7 @@ interface DailyLogPaneOptions {
 
 const DAILY_TASK_MIME = 'application/x-tavern-daily-task';
 const DAILY_SOURCE_MIME = 'application/x-tavern-daily-source';
+const DAILY_INDENT_STEP = 17;
 
 class DailyLogPane extends Component {
 	private day: string;
@@ -219,7 +216,7 @@ class DailyLogPane extends Component {
 
 	private renderTask(task: DailyTask): void {
 		const row = this.content.createDiv('tavern-daily-task tavern-project-task');
-		const depth = Math.floor(task.indent.replace(/\t/g, '    ').length / 2);
+		const depth = taskNestingDepth(task.indent);
 		row.style.setProperty('--tavern-task-depth', String(depth));
 		if (depth > 0) {
 			row.addClass('is-nested');
@@ -305,7 +302,7 @@ class DailyLogPane extends Component {
 			element.addClass('is-drop-target');
 			if (taskId) {
 				this.clearPlacement(element);
-				element.addClass(`is-drop-${this.dropPlacement(element, event)}`);
+				element.addClass(`is-drop-${taskDropPlacement(element, event, DAILY_INDENT_STEP)}`);
 			}
 		});
 		events.registerDomEvent(element, 'dragleave', () => this.clearDrop(element));
@@ -313,7 +310,9 @@ class DailyLogPane extends Component {
 			event.preventDefault();
 			event.stopPropagation();
 			this.clearDrop(element);
-			const target = taskId ? { taskId, placement: this.dropPlacement(element, event) } : undefined;
+			const target = taskId
+				? { taskId, placement: taskDropPlacement(element, event, DAILY_INDENT_STEP) }
+				: undefined;
 			void this.drop(event, target);
 		});
 	}
@@ -322,21 +321,6 @@ class DailyLogPane extends Component {
 		return Array.from(event.dataTransfer?.types ?? []).some((type) =>
 			[DAILY_TASK_MIME, DAILY_SOURCE_MIME].includes(type),
 		);
-	}
-
-	private dropPlacement(row: HTMLElement, event: DragEvent): DailyTaskDropPlacement {
-		const rect = row.getBoundingClientRect();
-		const relativeY = event.clientY - rect.top;
-		if (relativeY <= rect.height / 3) {
-			return 'before';
-		}
-		if (relativeY >= (rect.height * 2) / 3) {
-			return 'after';
-		}
-		if (event.clientX - rect.left >= 63) {
-			return 'child';
-		}
-		return 'after';
 	}
 
 	private clearPlacement(element: HTMLElement): void {

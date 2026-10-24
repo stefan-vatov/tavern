@@ -899,8 +899,8 @@ tavern: project
 		expect(twoSpaceRow?.style.getPropertyValue('--tavern-task-depth')).toBe('1');
 		expect(twoSpaceRow?.classes.has('is-nested')).toBe(true);
 		expect(fourSpaceRow?.style.getPropertyValue('--tavern-task-depth')).toBe('2');
-		expect(tabRow?.style.getPropertyValue('--tavern-task-depth')).toBe('1');
-		expect(mixedRow?.style.getPropertyValue('--tavern-task-depth')).toBe('2');
+		expect(tabRow?.style.getPropertyValue('--tavern-task-depth')).toBe('2');
+		expect(mixedRow?.style.getPropertyValue('--tavern-task-depth')).toBe('3');
 	});
 
 	it('should omit project note navigation preamble from the task renderer', async () => {
@@ -3368,6 +3368,59 @@ tavern: project
 			expect(controller.moveTask).not.toHaveBeenCalled();
 			expect(controller.editTask).not.toHaveBeenCalled();
 		});
+
+		it.each([
+			{ indent: '  ', depth: '1' },
+			{ indent: '   ', depth: '1.5' },
+			{ indent: '\t', depth: '2' },
+			{ indent: '\t  ', depth: '3' },
+		])(
+			'uses matching nested drop zones in the project and daily log with $indent indentation',
+			async ({ indent, depth }) => {
+				const controller = createDailyController(
+					DAILY_MARKDOWN.replace('  - [ ] Follow up', `${indent}- [ ] Follow up`),
+				);
+				const view = new TavernView({} as never, {
+					dailyLogs: controller,
+					saveSettings: vi.fn(),
+					vault: createVault({
+						'04_Projects/Pi.md': NESTED_MARKDOWN.replace(
+							'  - [ ] Child task',
+							`${indent}- [ ] Child task`,
+						),
+					}),
+					settings: { boardTaskKeys: [], projectFolders: ['04_Projects'], tavernName: 'Tavern' },
+				});
+				await view.setState(
+					{ boardPage: 'project', selectedPath: '04_Projects/Pi.md' },
+					{ history: false },
+				);
+				const root = rootElements.at(-1)!;
+				await vi.waitFor(() =>
+					expect(findByAriaLabel(root, 'Mark Follow up complete')).toBeDefined(),
+				);
+				const project = findByAriaLabel(root, 'Complete Child task')!.parent!;
+				const daily = findByAriaLabel(root, 'Mark Follow up complete')!.parent!;
+				for (const row of [project, daily]) {
+					expect(row.style.getPropertyValue('--tavern-task-depth')).toBe(depth);
+					for (const point of [
+						{ clientX: 140, clientY: 5, placement: 'before' },
+						{ clientX: 70, clientY: 15, placement: 'after' },
+						{ clientX: 140, clientY: 15, placement: 'child' },
+						{ clientX: 140, clientY: 9.95, placement: 'child' },
+						{ clientX: 140, clientY: 25, placement: 'after' },
+					]) {
+						row.dispatch('dragover', {
+							clientX: point.clientX,
+							clientY: point.clientY,
+							dataTransfer: { types: ['application/x-tavern-daily-task'] },
+						});
+						expect(row.classes.has(`is-drop-${point.placement}`)).toBe(true);
+						row.dispatch('dragleave');
+					}
+				}
+			},
+		);
 
 		it.each([
 			{ placement: 'before', clientX: 70, clientY: 5 },

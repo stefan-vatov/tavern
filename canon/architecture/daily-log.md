@@ -37,6 +37,14 @@ surrounding note content and operate on the current Markdown. Blank task
 creation and blank task-text edits are rejected. Task reordering and nesting
 carry the task's nested tree.
 
+Daily tasks use the same drag-handle gestures as project tasks: the upper and
+lower row edges place a task before or after the target; the middle area to the
+right nests it beneath the target. The nesting drop zone follows the target's
+visible indentation. A child drop must produce a child even when the note mixes
+tabs and spaces, preserving the existing children's indentation and the moved
+tree's relative nesting. Before/after drops adopt the target's sibling level.
+A task cannot be moved inside its own descendants.
+
 ## Copies and stable references
 
 Dragging a task from the global or focus queue into the daily log copies its
