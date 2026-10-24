@@ -12,6 +12,7 @@
 			"includeEntryExports": true,
 			"entry": [
 				"scripts/set-version.mjs!",
+				"scripts/verify-release.mjs!",
 				"src/main.ts!",
 				"src/project-actions.ts!",
 				"src/project-library.ts!",

@@ -176,9 +176,13 @@ Conventional commits decide the next version:
 - `feat: ...` publishes a minor release.
 - A breaking change publishes a major release.
 
-The release job runs `pnpm run check`, bumps `package.json`, `manifest.json`,
-and `versions.json`, builds `main.js`, writes `CHANGELOG.md`, creates a GitHub
-release, and attaches the BRAT/Obsidian assets individually.
+The release job checks the checkout, then generates `CHANGELOG.md` and updates
+`package.json`, `manifest.json`, and `versions.json`. It formats the generated
+changelog and runs `pnpm run check:ci` again on the prepared release, including a
+fresh build. Before committing or publishing, `pnpm run release:verify` checks
+that the version metadata agrees and that all three BRAT assets exist, are
+nonempty, and include a JavaScript bundle that parses. A failure stops publication.
+The release commit and GitHub release are created only after those checks pass.
 
 Run this locally from a clone whose release branch already exists on GitHub to
 see what semantic-release would do without publishing:

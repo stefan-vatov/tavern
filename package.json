@@ -38,7 +38,8 @@
 		"test:mutation:incremental": "stryker run --incremental",
 		"knip": "knip --cache --strict",
 		"knip:watch": "knip --watch --strict",
-		"knip:ci": "knip --cache --strict"
+		"knip:ci": "knip --cache --strict",
+		"release:verify": "node scripts/verify-release.mjs"
 	},
 	"dependencies": {
 		"effect": "^3.21.2",

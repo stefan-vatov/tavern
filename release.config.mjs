@@ -15,7 +15,7 @@ const releaseConfig = {
 			'@semantic-release/exec',
 			{
 				prepareCmd:
-					'pnpm run release:version ${nextRelease.version} && pnpm exec oxfmt CHANGELOG.md && pnpm run build',
+					'pnpm run release:version ${nextRelease.version} && pnpm exec oxfmt CHANGELOG.md && pnpm run check:ci && pnpm run release:verify ${nextRelease.version}',
 			},
 		],
 		[

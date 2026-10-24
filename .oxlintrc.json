@@ -34,5 +34,13 @@
 		"import/consistent-type-specifier-style": "off",
 		"import/group-exports": "off",
 		"import/no-named-export": "off"
-	}
+	},
+	"overrides": [
+		{
+			"files": ["scripts/verify-release.mjs", "test/release.test.ts"],
+			"rules": {
+				"import/no-nodejs-modules": "off"
+			}
+		}
+	]
 }
