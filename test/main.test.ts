@@ -534,13 +534,15 @@ describe('daily task plugin events', () => {
 
 	it('retains the saved registry in memory when a controller action cannot persist changed links', async () => {
 		const state = await setupLinkedTasks();
+		const source = state.files.get(linkedSourcePath);
+		const daily = state.files.get(linkedDailyPath);
 		vi.mocked(state.plugin.saveData).mockRejectedValueOnce(new Error('Settings write failed.'));
 		await expect(
 			state.controller.setTaskChecked(linkedDay, 'block:copy-task', true),
 		).rejects.toThrow('Settings write failed.');
 		expect(state.plugin.settings.dailyTaskLinks).toEqual(state.links);
 		expect(state.plugin.settings.dailyTaskLinks![0]!.checked).toBe(false);
-		expect(state.files.get(linkedSourcePath)).toContain('- [x] Source ^source-task');
-		expect(state.files.get(linkedDailyPath)).toContain('- [x] Daily copy ^copy-task');
+		expect(state.files.get(linkedSourcePath)).toBe(source);
+		expect(state.files.get(linkedDailyPath)).toBe(daily);
 	});
 });

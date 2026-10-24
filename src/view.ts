@@ -4,6 +4,7 @@ import { Component, ItemView, Menu, Notice, Scope, setIcon, type WorkspaceLeaf }
 import { addTaskToFocusQueue, createProjectBoardModel } from './project-board-model';
 import type { DailyLogController } from './daily-log-controller';
 import DailyLogPane from './daily-log-pane';
+import { projectTaskHasChildren } from './project-actions';
 import {
 	filterTasks,
 	projectTasks,
@@ -17,7 +18,7 @@ import { indentWidth, type ProjectTask } from './project-note';
 import {
 	addVaultProjectTaskPlan,
 	completeVaultProjectTask,
-	deleteVaultProjectTask,
+	deleteVaultProjectTaskPlan,
 	editVaultProjectTaskPlan,
 	loadVaultProjectLibrary,
 	moveVaultProjectTask,
@@ -28,7 +29,8 @@ import {
 import { TAVERN_VIEW_TYPE } from './project-mode';
 import type { TavernSettings } from './settings-defaults';
 import { taskDropPlacement, taskNestingDepth } from './task-drag';
-import type { TaskEditPlan } from './task-edit';
+import addTaskDeleteItems from './task-context-menu';
+import type { TaskDeleteMode, TaskEditPlan } from './task-edit';
 import showTaskEditRecovery from './task-edit-recovery';
 import { createTaskTextEditor, type TaskTextEditor } from './task-text-editor';
 
@@ -107,6 +109,13 @@ class TavernView extends ItemView {
 	private sidebarOpen = false;
 	private closed = false;
 	private readonly activeEditors = new Set<TaskTextEditor>();
+	private readonly pendingTaskReferences = new Set<{ projectPath: string; id: string }>();
+	private contextMenuTask: { projectPath: string; id: string } | undefined;
+	private readonly renderedTaskReferences = new Map<HTMLElement, ProjectBoardTask>();
+	private taskMutationQueue = Promise.resolve();
+	private taskReferencePruneScheduled = false;
+	private dailyDragSource: { key: string; task: ProjectBoardTask } | undefined;
+	private unsubscribeTaskReferences: (() => void) | undefined;
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -132,6 +141,15 @@ class TavernView extends ItemView {
 
 	async onOpen(): Promise<void> {
 		this.closed = false;
+		this.unsubscribeTaskReferences?.();
+		this.unsubscribeTaskReferences = this.deps.dailyLogs?.onTaskReferencesChanged?.(
+			(path, mapping, kind) => {
+				if (kind === 'project') {
+					this.applyTaskReferences(path, mapping);
+				}
+			},
+		);
+		this.register(() => this.unsubscribeTaskReferences?.());
 		this.dailyDay = this.deps.dailyLogs?.today() ?? '';
 		try {
 			await this.deps.dailyLogs?.syncAll?.();
@@ -147,6 +165,8 @@ class TavernView extends ItemView {
 		// eslint-disable-next-line eslint/no-underscore-dangle
 		// eslint-disable-next-line eslint/no-underscore-dangle
 		this.closed = true;
+		this.unsubscribeTaskReferences?.();
+		this.unsubscribeTaskReferences = undefined;
 		// Closing must not wait indefinitely for vault I/O; pending saves still report through their callbacks.
 		// eslint-disable-next-line promise/prefer-await-to-then
 		void this.finishTaskEditing().catch(() => {});
@@ -350,10 +370,16 @@ class TavernView extends ItemView {
 				onChanged: () => this.refreshProjects(),
 				projectTaskFromDrop: (event) => {
 					const key = event.dataTransfer?.getData(DAILY_SOURCE_MIME) ?? '';
+					if (key && key === this.dailyDragSource?.key) {
+						return this.dailyDragSource.task;
+					}
 					return this.taskFromSelectionKey(key);
 				},
 				isEditing: () => this.activeEditors.size > 0,
-				finishEditing: () => this.finishTaskEditing(),
+				finishEditing: async () => {
+					await this.finishTaskEditing();
+					await this.taskMutationQueue;
+				},
 				renderTaskText: (container, text, options) => {
 					this.renderEditableTaskText(container, text, options);
 				},
@@ -607,7 +633,7 @@ class TavernView extends ItemView {
 			this.openTaskProject(task);
 		});
 		this.registerDomEvent(row, 'contextmenu', (event) => {
-			this.showTaskContextMenu(event, task);
+			void this.showTaskContextMenu(event, task);
 		});
 
 		const checkbox = row.createEl('input', {
@@ -953,7 +979,12 @@ class TavernView extends ItemView {
 		const editor = this.bindTaskCapture(form, input, async (plan) => {
 			try {
 				if (this.deps.dailyLogs?.addProjectTaskPlan) {
-					await this.deps.dailyLogs.addProjectTaskPlan(project.path, sectionName, plan);
+					const mapping = await this.deps.dailyLogs.addProjectTaskPlan(
+						project.path,
+						sectionName,
+						plan,
+					);
+					this.remapTaskReferences(project.path, mapping);
 				} else {
 					const mapping = await Effect.runPromise(
 						addVaultProjectTaskPlan({
@@ -1031,7 +1062,9 @@ class TavernView extends ItemView {
 		this.renderTaskDragHandle(taskEl, task.text, (event) => {
 			event.dataTransfer?.setData(TASK_ID_MIME, task.id);
 			event.dataTransfer?.setData(TASK_QUEUE_KEY_MIME, taskSelectionKey(boardTask));
-			event.dataTransfer?.setData(DAILY_SOURCE_MIME, taskSelectionKey(boardTask));
+			if (boardTask) {
+				this.rememberDailySource(event, boardTask);
+			}
 		});
 		this.registerDomEvent(taskEl, 'dragover', (event) => {
 			this.markTaskDropTarget(event, taskEl);
@@ -1049,12 +1082,12 @@ class TavernView extends ItemView {
 			}
 		});
 		this.registerDomEvent(taskEl, 'contextmenu', (event) => {
-			this.showTaskContextMenu(event, boardTask);
+			void this.showTaskContextMenu(event, boardTask);
 		});
 
-		const linked = boardTask && this.deps.dailyLogs?.isLinked?.(boardTask);
+		const canReopen = boardTask && this.deps.dailyLogs?.setProjectTaskChecked;
 		let checkboxLabel = `Complete ${task.text}`;
-		if (linked && task.checked) {
+		if (canReopen && task.checked) {
 			checkboxLabel = `Reopen ${task.text}`;
 		}
 		const checkbox = taskEl.createEl('input', {
@@ -1062,12 +1095,12 @@ class TavernView extends ItemView {
 			type: 'checkbox',
 		});
 		checkbox.checked = task.checked;
-		checkbox.disabled = task.checked && task.sectionName === DONE_SECTION_NAME && !linked;
+		checkbox.disabled = task.checked && task.sectionName === DONE_SECTION_NAME && !canReopen;
 		this.registerDomEvent(checkbox, 'change', () => {
 			if (checkbox.checked) {
 				void this.completeTask(boardTask);
-			} else if (linked && boardTask) {
-				void this.setLinkedTaskChecked(boardTask, false);
+			} else if (canReopen && boardTask) {
+				void this.setProjectTaskChecked(boardTask, false);
 			}
 		});
 
@@ -1093,7 +1126,7 @@ class TavernView extends ItemView {
 			this.setDailySource(event, task);
 		});
 		this.registerDomEvent(row, 'contextmenu', (event) => {
-			this.showTaskContextMenu(event, task);
+			void this.showTaskContextMenu(event, task);
 		});
 		const checkbox = row.createEl('input', {
 			attr: { 'aria-label': `Complete ${task.text}` },
@@ -1147,8 +1180,16 @@ class TavernView extends ItemView {
 
 	private setDailySource(event: DragEvent, task: ProjectBoardTask): void {
 		if (indentWidth(task.indent) === 0) {
-			event.dataTransfer?.setData(DAILY_SOURCE_MIME, taskSelectionKey(task));
+			this.rememberDailySource(event, task);
+		} else {
+			this.dailyDragSource = undefined;
 		}
+	}
+
+	private rememberDailySource(event: DragEvent, task: ProjectBoardTask): void {
+		const key = taskSelectionKey(task);
+		this.dailyDragSource = { key, task };
+		event.dataTransfer?.setData(DAILY_SOURCE_MIME, key);
 	}
 
 	private renderTaskPin(containerEl: HTMLElement, task: ProjectBoardTask | undefined): void {
@@ -1179,6 +1220,16 @@ class TavernView extends ItemView {
 	): void {
 		const label = containerEl.createSpan('tavern-project-task-text tavern-editable-task-text');
 		const row = containerEl.closest<HTMLElement>('.tavern-project-task')!;
+		if (options.task) {
+			this.renderedTaskReferences.set(label, options.task);
+			if (!this.taskReferencePruneScheduled) {
+				this.taskReferencePruneScheduled = true;
+				queueMicrotask(() => {
+					this.taskReferencePruneScheduled = false;
+					this.pruneTaskReferences();
+				});
+			}
+		}
 		const depth = options.depth ?? taskNestingDepth(options.task?.indent ?? '');
 		const editor = createTaskTextEditor({
 			containerEl: label,
@@ -1331,26 +1382,43 @@ class TavernView extends ItemView {
 		}
 	}
 
-	private showTaskContextMenu(event: MouseEvent, task: ProjectBoardTask | undefined): void {
+	private async showTaskContextMenu(
+		event: MouseEvent,
+		task: ProjectBoardTask | undefined,
+	): Promise<void> {
 		event.preventDefault();
 		event.stopPropagation();
 
+		const target = { projectPath: task?.projectPath ?? '', id: task?.id ?? '' };
+		this.contextMenuTask = target;
+		try {
+			await this.finishTaskEditing();
+			await this.taskMutationQueue;
+			await this.deps.dailyLogs?.whenIdle?.();
+		} catch {
+			return;
+		}
+		await this.refreshProjects();
+		if (this.closed || this.contextMenuTask !== target || !target.id) {
+			return;
+		}
+		const current = this.findBoardTask(target.projectPath, target.id);
+		if (!current) {
+			return;
+		}
 		const menu = new Menu();
-		menu.addItem((item) => {
-			item
-				.setTitle('Delete task')
-				.setIcon('trash')
-				.onClick(() => {
-					void this.deleteTask(task);
-				});
-		});
-		if (this.isTaskSelected(task)) {
+		const project = this.library.projects.find(
+			(candidate) => candidate.path === target.projectPath,
+		);
+		const hasChildren = Boolean(project && projectTaskHasChildren(project.note, current.id));
+		addTaskDeleteItems(menu, hasChildren, (mode) => this.deleteTask(target, mode));
+		if (this.isTaskSelected(current)) {
 			menu.addItem((item) => {
 				item
 					.setTitle('Remove from global queue')
 					.setIcon('pin-off')
 					.onClick(() => {
-						void this.removeTaskSelection(task);
+						void this.removeTaskSelection(current);
 					});
 			});
 		} else {
@@ -1359,7 +1427,7 @@ class TavernView extends ItemView {
 					.setTitle('Add to global queue')
 					.setIcon('pin')
 					.onClick(() => {
-						void this.addTaskSelection(task);
+						void this.addTaskSelection(current);
 					});
 			});
 		}
@@ -1397,8 +1465,8 @@ class TavernView extends ItemView {
 	}
 
 	private async completeTask(task: ProjectBoardTask | undefined): Promise<void> {
-		if (task && this.deps.dailyLogs?.isLinked?.(task)) {
-			await this.setLinkedTaskChecked(task, true);
+		if (task && this.deps.dailyLogs?.setProjectTaskChecked) {
+			await this.setProjectTaskChecked(task, true);
 			return;
 		}
 		const exit = await Effect.runPromiseExit(completeVaultProjectTask(this.deps.vault, task));
@@ -1413,40 +1481,83 @@ class TavernView extends ItemView {
 		await this.refreshProjects();
 	}
 
-	private async setLinkedTaskChecked(task: ProjectBoardTask, checked: boolean): Promise<void> {
-		try {
-			await this.deps.dailyLogs?.setProjectTaskChecked?.(task, checked);
-			if (checked) {
-				await this.removeTaskSelection(task);
-			}
-		} catch (error) {
-			new Notice(`Tavern: ${String(error)}`);
-		}
-		await this.refreshProjects();
+	private setProjectTaskChecked(task: ProjectBoardTask, checked: boolean): Promise<void> {
+		return this.queueProjectMutation(
+			[task],
+			async () => {
+				const mapping = await this.deps.dailyLogs?.setProjectTaskChecked?.(task, checked);
+				this.remapTaskReferences(task.projectPath, mapping);
+				if (checked) {
+					await this.removeTaskSelection(task);
+				}
+			},
+			'Tavern could not change the task checkbox.',
+		);
 	}
 
-	private async deleteTask(task: ProjectBoardTask | undefined): Promise<void> {
-		const exit = await Effect.runPromiseExit(deleteVaultProjectTask(this.deps.vault, task));
-		if (Exit.isFailure(exit)) {
-			new Notice('Tavern could not delete the task.');
-			// Always refresh on VaultActionError (incl. not-found, races) so any ghosts from TOCTOU (RMW between snapshot and op) are cleared. See updateProjectSource.
+	private deleteTask(
+		target: { projectPath: string; id: string },
+		mode: TaskDeleteMode,
+	): Promise<void> {
+		return this.queueProjectMutation(
+			[target],
+			async () => {
+				if (!target.id) {
+					return;
+				}
+				await this.refreshProjects();
+				const current = this.findBoardTask(target.projectPath, target.id);
+				if (current && this.deps.dailyLogs?.deleteProjectTask) {
+					const mapping = await this.deps.dailyLogs.deleteProjectTask(current, mode);
+					this.remapTaskReferences(target.projectPath, mapping);
+				} else {
+					const mapping = await Effect.runPromise(
+						deleteVaultProjectTaskPlan(this.deps.vault, current, mode),
+					);
+					await this.remapEditedTaskKeys(target.projectPath, mapping);
+				}
+			},
+			'Tavern could not delete the task.',
+		);
+	}
+
+	private queueProjectMutation(
+		tasks: { projectPath: string; id: string }[],
+		action: () => Promise<void>,
+		failureMessage: string,
+	): Promise<void> {
+		for (const task of tasks) {
+			this.pendingTaskReferences.add(task);
+		}
+		const previous = this.taskMutationQueue;
+		const mutation = (async () => {
+			await previous;
+			try {
+				await this.finishTaskEditing();
+				await this.deps.dailyLogs?.whenIdle?.();
+				await action();
+			} catch {
+				new Notice(failureMessage);
+			} finally {
+				for (const task of tasks) {
+					this.pendingTaskReferences.delete(task);
+				}
+			}
 			await this.refreshProjects();
-			return;
-		}
-		const keys = this.taskTreeSelectionKeys(task);
-		if (keys.some((key) => this.deps.settings.boardTaskKeys.includes(key))) {
-			this.deps.settings.boardTaskKeys = this.deps.settings.boardTaskKeys.filter(
-				(key) => !keys.includes(key),
-			);
-			await this.deps.saveSettings();
-		}
-		await this.refreshProjects();
+		})();
+		this.taskMutationQueue = (async () => {
+			try {
+				await mutation;
+			} catch {}
+		})();
+		return mutation;
 	}
 
 	private async editTask(task: ProjectBoardTask | undefined, plan: TaskEditPlan): Promise<void> {
 		try {
 			if (task && this.deps.dailyLogs?.editProjectTaskPlan) {
-				await this.deps.dailyLogs.editProjectTaskPlan(task, plan);
+				const mapping = await this.deps.dailyLogs.editProjectTaskPlan(task, plan);
+				this.remapTaskReferences(task.projectPath, mapping);
 			} else {
 				const mapping = await Effect.runPromise(
 					editVaultProjectTaskPlan(this.deps.vault, task, plan),
@@ -1462,6 +1573,7 @@ class TavernView extends ItemView {
 	}
 
 	private async remapEditedTaskKeys(path: string, mapping: Map<string, string>): Promise<void> {
+		this.remapTaskReferences(path, mapping);
 		const prefix = `${path}::`;
 		const keys = this.deps.settings.boardTaskKeys.flatMap((key) => {
 			if (!key.startsWith(prefix)) {
@@ -1476,8 +1588,53 @@ class TavernView extends ItemView {
 		await this.updateBoardTaskKeys(keys);
 	}
 
+	private remapTaskReferences(path: string, mapping: Map<string, string> | void): void {
+		if (!this.unsubscribeTaskReferences) {
+			this.applyTaskReferences(path, mapping);
+		}
+	}
+
+	private applyTaskReferences(path: string, mapping: Map<string, string> | void): void {
+		this.pruneTaskReferences();
+		const targets = new Set([
+			...this.pendingTaskReferences,
+			...this.renderedTaskReferences.values(),
+		]);
+		if (this.contextMenuTask) {
+			targets.add(this.contextMenuTask);
+		}
+		if (this.dailyDragSource) {
+			targets.add(this.dailyDragSource.task);
+		}
+		for (const target of targets) {
+			if (target.projectPath === path) {
+				target.id = mapping?.get(target.id) ?? target.id;
+			}
+		}
+	}
+
+	private pruneTaskReferences(): void {
+		for (const [label] of this.renderedTaskReferences) {
+			if (!this.contentEl.contains(label)) {
+				this.renderedTaskReferences.delete(label);
+			}
+		}
+	}
+
 	private async moveTask(task: ProjectBoardTask, targetSectionName: string): Promise<void> {
 		if (task.sectionName === targetSectionName) {
+			return;
+		}
+
+		if (this.deps.dailyLogs?.moveProjectTask) {
+			await this.queueProjectMutation(
+				[task],
+				async () => {
+					const mapping = await this.deps.dailyLogs?.moveProjectTask?.(task, targetSectionName);
+					this.remapTaskReferences(task.projectPath, mapping);
+				},
+				'Tavern could not move the task.',
+			);
 			return;
 		}
 
@@ -1502,6 +1659,22 @@ class TavernView extends ItemView {
 			return;
 		}
 
+		if (targetTask && this.deps.dailyLogs?.moveProjectTaskToPosition) {
+			await this.queueProjectMutation(
+				[sourceTask, targetTask],
+				async () => {
+					const mapping = await this.deps.dailyLogs?.moveProjectTaskToPosition?.(
+						sourceTask,
+						targetTask,
+						placement,
+					);
+					this.remapTaskReferences(sourceTask.projectPath, mapping);
+				},
+				'Tavern could not move the task.',
+			);
+			return;
+		}
+
 		const exit = await Effect.runPromiseExit(
 			moveVaultProjectTaskToPosition({
 				placement,
@@ -1523,6 +1696,18 @@ class TavernView extends ItemView {
 		task: ProjectBoardTask | undefined,
 		direction: 'down' | 'up',
 	): Promise<void> {
+		if (task && this.deps.dailyLogs?.reorderProjectTask) {
+			await this.queueProjectMutation(
+				[task],
+				async () => {
+					const mapping = await this.deps.dailyLogs?.reorderProjectTask?.(task, direction);
+					this.remapTaskReferences(task.projectPath, mapping);
+				},
+				'Tavern could not reorder the task.',
+			);
+			return;
+		}
+
 		const exit = await Effect.runPromiseExit(
 			reorderVaultProjectTask(this.deps.vault, task, direction),
 		);
@@ -1585,6 +1770,9 @@ class TavernView extends ItemView {
 
 		for (const task of selectedTasks) {
 			const row = body.createDiv('tavern-focus-task');
+			this.registerDomEvent(row, 'contextmenu', (event) => {
+				void this.showTaskContextMenu(event, task);
+			});
 			this.applyTaskNesting(row, task);
 			/* c8 ignore next -- focus queue done de-emphasize (similar covered in project sections test; branch listed) */
 			if (task.checked) {

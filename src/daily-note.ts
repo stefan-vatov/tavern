@@ -1,5 +1,6 @@
 /* eslint-disable eslint/func-style, eslint/max-statements, eslint/no-continue, eslint/no-magic-numbers, eslint/no-ternary */
 import type { ProjectTask } from './project-note';
+import type { TaskEditResult } from './task-edit';
 
 type DailyTask = ProjectTask & { blockId?: string };
 type DailyTaskDropPlacement = 'before' | 'after' | 'child';
@@ -7,8 +8,8 @@ type DailyNoteItem =
 	| { type: 'heading'; level: number; text: string; lineIndex: number }
 	| { type: 'text'; raw: string; lineIndex: number }
 	| { type: 'task'; task: DailyTask };
-type DailyNote = { items: DailyNoteItem[]; tasks: DailyTask[] };
-type MarkdownLine = { raw: string; ending: string };
+type DailyNote = { markdown: string; items: DailyNoteItem[]; tasks: DailyTask[] };
+type MarkdownLine = { raw: string; ending: string; original?: number };
 
 const TASK = /^([\t ]*)([-+*] \[)([ xX])(\][\t ]*)(.*)$/;
 const HEADING = /^ {0,3}(#{1,6})\s+(.+?)\s*#*\s*$/;
@@ -54,7 +55,7 @@ function createDailyNote(day: string): string {
 function readLines(markdown: string): MarkdownLine[] {
 	return Array.from(markdown.matchAll(/([^\r\n]*)(\r\n|\n|\r|$)/g))
 		.filter((match) => match[0] !== '')
-		.map((match) => ({ raw: match[1] ?? '', ending: match[2] ?? '' }));
+		.map((match, original) => ({ raw: match[1] ?? '', ending: match[2] ?? '', original }));
 }
 
 function writeLines(lines: MarkdownLine[]): string {
@@ -121,7 +122,7 @@ function parseDailyNote(markdown: string): DailyNote {
 		tasks.push(task);
 		items.push({ type: 'task', task });
 	}
-	return { items, tasks };
+	return { markdown, items, tasks };
 }
 
 function requireTask(markdown: string, lineIndex: number): DailyTask {
@@ -179,9 +180,16 @@ function addDailyTask(markdown: string, text: string, sectionName = 'Plan'): str
 }
 
 function appendDailyTaskLines(markdown: string, raws: string[], sectionName: string): string {
-	const name = taskText(sectionName);
 	const lines = readLines(markdown);
-	const headings = parseDailyNote(markdown).items.filter((item) => item.type === 'heading');
+	appendTaskLines(lines, raws, sectionName);
+	return writeLines(lines);
+}
+
+function appendTaskLines(lines: MarkdownLine[], raws: string[], sectionName: string): void {
+	const name = taskText(sectionName);
+	const headings = parseDailyNote(writeLines(lines)).items.filter(
+		(item) => item.type === 'heading',
+	);
 	const section = headings.find((item) => item.text === name);
 	if (section) {
 		const nextHeading = headings.find(
@@ -205,7 +213,6 @@ function appendDailyTaskLines(markdown: string, raws: string[], sectionName: str
 			'',
 		]);
 	}
-	return writeLines(lines);
 }
 
 function indentWidth(indent: string): number {
@@ -301,7 +308,7 @@ function insertDailyTaskTree(
 	markdown: string,
 	taskMarkdown: string,
 	target?: { lineIndex: number; placement: DailyTaskDropPlacement },
-): string {
+): TaskEditResult {
 	const sourceLines = readLines(taskMarkdown);
 	const [root] = parseDailyNote(taskMarkdown).tasks;
 	if (!root || root.lineIndex !== 0 || !root.text.trim()) {
@@ -334,11 +341,19 @@ function insertDailyTaskTree(
 			: ' '.repeat(Math.max(0, indentWidth(oldIndent) - indentWidth(root.indent)));
 		return indent + relative + raw.slice(oldIndent.length);
 	});
-	if (!target) {
-		return appendDailyTaskLines(markdown, raws, 'Plan');
+	if (target) {
+		insertLines(lines, index, raws);
+	} else {
+		appendTaskLines(lines, raws, 'Plan');
 	}
-	insertLines(lines, index, raws);
-	return writeLines(lines);
+	return {
+		markdown: writeLines(lines),
+		lineMapping: new Map(
+			lines.flatMap((line, lineIndex) =>
+				line.original === undefined ? [] : [[line.original, lineIndex]],
+			),
+		),
+	};
 }
 
 export {

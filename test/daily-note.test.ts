@@ -150,10 +150,21 @@ describe('daily log Markdown', () => {
 		const source = '\t- [ ] Imported \u005elinked\n\t  Supporting prose.\n\t  - [x] Child\n';
 		const note =
 			'---\r\nkind: log\r\n---\r\n### Plan\r\n- [ ] Existing\r\n\r\n### Notes\r\nKeep this.\n';
-		expect(insertDailyTaskTree(note, source)).toBe(
+		const result = insertDailyTaskTree(note, source);
+		expect(result.markdown).toBe(
 			'---\r\nkind: log\r\n---\r\n### Plan\r\n- [ ] Existing\r\n- [ ] Imported ^linked\r\n  Supporting prose.\r\n  - [x] Child\r\n\r\n### Notes\r\nKeep this.\n',
 		);
-		expect(insertDailyTaskTree('# Day\nNarrative.\n', '- [ ] ### Task text')).toBe(
+		expect([...result.lineMapping]).toEqual([
+			[0, 0],
+			[1, 1],
+			[2, 2],
+			[3, 3],
+			[4, 4],
+			[5, 8],
+			[6, 9],
+			[7, 10],
+		]);
+		expect(insertDailyTaskTree('# Day\nNarrative.\n', '- [ ] ### Task text').markdown).toBe(
 			'# Day\nNarrative.\n\n## General\n\n### Plan\n\n- [ ] ### Task text\n\n',
 		);
 	});
@@ -165,7 +176,8 @@ describe('daily log Markdown', () => {
 	] as const)('inserts %s relative to the full destination subtree', (placement, tasks) => {
 		const note = '### Plan\n- [ ] Target\n\t- [ ] Existing child\n### Notes\nNarrative';
 		expect(
-			insertDailyTaskTree(note, '- [ ] Imported\n  - [ ] Nested', { lineIndex: 1, placement }),
+			insertDailyTaskTree(note, '- [ ] Imported\n  - [ ] Nested', { lineIndex: 1, placement })
+				.markdown,
 		).toBe(`### Plan\n${tasks}### Notes\nNarrative`);
 	});
 
@@ -241,7 +253,7 @@ describe('daily log Markdown', () => {
 					insertDailyTaskTree(`### Plan\r\n${destination}`, source, {
 						lineIndex: 2,
 						placement: 'child',
-					}),
+					}).markdown,
 				)
 				.toBe(expected);
 		},
@@ -281,7 +293,7 @@ describe('daily log Markdown', () => {
 
 	it('creates Plan inside the existing General section without swallowing narrative or the next section', () => {
 		const note = '# Day\n## General\nAn intro.\n### Notes\nKeep notes.\n## Other\nOther prose.\n';
-		expect(insertDailyTaskTree(note, '- [ ] Captured\n  - [x] Detail')).toBe(
+		expect(insertDailyTaskTree(note, '- [ ] Captured\n  - [x] Detail').markdown).toBe(
 			'# Day\n## General\nAn intro.\n### Notes\nKeep notes.\n### Plan\n\n- [ ] Captured\n  - [x] Detail\n\n## Other\nOther prose.\n',
 		);
 	});

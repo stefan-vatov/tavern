@@ -17,10 +17,18 @@ import {
 	type ProjectTaskReorderDirection,
 	type ProjectNote,
 } from './project-note';
-import { applyTaskEdit, hasTaskEditContent, type TaskEditPlan } from './task-edit';
+import {
+	applyTaskDelete,
+	applyTaskEdit,
+	hasTaskEditContent,
+	taskHasChildren,
+	type TaskDeleteMode,
+	type TaskEditPlan,
+	type TaskEditResult,
+} from './task-edit';
 
 type ProjectActionError = ProjectNoteParseError | ProjectTaskError;
-type ProjectTaskPlanResult = { markdown: string; mapping: Map<string, string> };
+type ProjectTaskPlanResult = TaskEditResult & { mapping: Map<string, string> };
 type MoveProjectTaskToPositionInput = {
 	markdown: string;
 	placement: ProjectTaskDropPlacement;
@@ -124,10 +132,33 @@ const projectTaskLines = (note: ProjectNote): { id: string; lineIndex: number }[
 	});
 };
 
+const projectTaskHasChildren = (note: ProjectNote, taskId: string): boolean => {
+	const task = projectTaskLines(note).find((candidate) => candidate.id === taskId);
+	return task ? taskHasChildren(serializeProjectNote(note), task.lineIndex) : false;
+};
+
 const editProjectTaskPlan = (
 	markdown: string,
 	taskId: string,
 	plan: TaskEditPlan,
+): Effect.Effect<ProjectTaskPlanResult, ProjectActionError> =>
+	transformProjectTaskPlan(markdown, taskId, (lineIndex) =>
+		applyTaskEdit(markdown, lineIndex, plan),
+	);
+
+const deleteProjectTaskPlan = (
+	markdown: string,
+	taskId: string,
+	mode: TaskDeleteMode,
+): Effect.Effect<ProjectTaskPlanResult, ProjectActionError> =>
+	transformProjectTaskPlan(markdown, taskId, (lineIndex) =>
+		applyTaskDelete(markdown, lineIndex, mode),
+	);
+
+const transformProjectTaskPlan = (
+	markdown: string,
+	taskId: string,
+	transform: (lineIndex: number) => TaskEditResult,
 ): Effect.Effect<ProjectTaskPlanResult, ProjectActionError> =>
 	Effect.gen(function* () {
 		const note = yield* parseProjectNote(markdown);
@@ -141,7 +172,7 @@ const editProjectTaskPlan = (
 			});
 		}
 		const transformed = yield* Effect.try({
-			try: () => applyTaskEdit(markdown, task.lineIndex, plan),
+			try: () => transform(task.lineIndex),
 			catch: (error) =>
 				new ProjectTaskError({
 					message: error instanceof Error ? error.message : 'Unable to edit task.',
@@ -156,7 +187,7 @@ const editProjectTaskPlan = (
 				return [candidate.id, nextLine === undefined ? '' : (byLine.get(nextLine) ?? '')];
 			}),
 		);
-		return { markdown: transformed.markdown, mapping };
+		return { ...transformed, mapping };
 	});
 
 const addProjectTaskPlan = (
@@ -167,8 +198,15 @@ const addProjectTaskPlan = (
 	Effect.gen(function* () {
 		const note = yield* parseProjectNote(markdown);
 		const before = projectTaskLines(note);
+		const originalLines = Array.from(markdown.matchAll(/([^\r\n]*)(\r\n|\n|\r|$)/g))
+			.filter((match) => match[0] !== '')
+			.map((_line, index) => index);
 		if (!hasTaskEditContent(plan)) {
-			return { markdown, mapping: new Map(before.map((task) => [task.id, task.id])) };
+			return {
+				markdown,
+				mapping: new Map(before.map((task) => [task.id, task.id])),
+				lineMapping: new Map(originalLines.map((line) => [line, line])),
+			};
 		}
 		const staged = stageProjectTask(markdown, note, sectionName);
 		const stagedTasks = projectTaskLines(yield* parseProjectNote(staged.markdown));
@@ -177,6 +215,13 @@ const addProjectTaskPlan = (
 		const byLine = new Map(stagedTasks.map((task) => [task.lineIndex, task.id]));
 		return {
 			markdown: result.markdown,
+			lineMapping: new Map(
+				originalLines.flatMap((line) => {
+					const stagedLine = line + (line >= staged.insertionIndex ? staged.count : 0);
+					const next = result.lineMapping.get(stagedLine);
+					return next === undefined ? [] : [[line, next]];
+				}),
+			),
 			mapping: new Map(
 				before.map((task) => {
 					const line =
@@ -248,10 +293,12 @@ export {
 	addProjectTaskPlan,
 	completeProjectTask,
 	deleteProjectTask,
+	deleteProjectTaskPlan,
 	editProjectTask,
 	editProjectTaskPlan,
 	moveProjectTask,
 	moveProjectTaskToPosition,
+	projectTaskHasChildren,
 	reorderProjectTask,
 	setProjectTaskChecked,
 };

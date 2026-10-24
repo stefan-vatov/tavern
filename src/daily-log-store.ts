@@ -5,13 +5,21 @@ import {
 	dailyLogPath,
 	editDailyTask,
 	localDay,
+	insertDailyTaskTree,
 	moveDailyTask,
 	parseDailyNote,
 	setDailyTaskChecked,
 	type DailyTask,
 } from './daily-note';
 import type { ProjectVault, ProjectVaultFile } from './project-vault';
-import { applyTaskEdit, hasTaskEditContent, type TaskEditPlan } from './task-edit';
+import {
+	applyTaskDelete,
+	applyTaskEdit,
+	hasTaskEditContent,
+	type TaskDeleteMode,
+	type TaskEditPlan,
+	type TaskEditResult,
+} from './task-edit';
 
 interface DailyLogVault extends ProjectVault {
 	getAbstractFileByPath(path: string): ProjectVaultFile | null;
@@ -36,6 +44,58 @@ const findDailyTask = (markdown: string, taskId: string): DailyTask => {
 		throw new Error('Daily task identity is ambiguous.');
 	}
 	return task;
+};
+
+const mapDailyTasks = (
+	before: DailyTask[],
+	transformed: TaskEditResult,
+	staged = before,
+): Map<string, string> => {
+	const byLine = new Map(
+		parseDailyNote(transformed.markdown).tasks.map((task) => [task.lineIndex, task.id]),
+	);
+	return new Map(
+		before.map((task, index) => {
+			const line = transformed.lineMapping.get(staged[index]!.lineIndex);
+			let id = '';
+			if (line !== undefined) {
+				id = byLine.get(line) ?? '';
+			}
+			return [task.id, id];
+		}),
+	);
+};
+
+const addDailyTaskPlan = (markdown: string, plan: TaskEditPlan): TaskEditResult => {
+	const before = parseDailyNote(markdown).tasks;
+	if (!hasTaskEditContent(plan)) {
+		const lines = Array.from(markdown.matchAll(/([^\r\n]*)(\r\n|\n|\r|$)/g)).filter(
+			([matched]) => matched !== '',
+		);
+		return { markdown, lineMapping: new Map(lines.map((_line, index) => [index, index])) };
+	}
+	let anchorText = 'Draft';
+	while (before.some((task) => task.text === anchorText)) {
+		anchorText += ' draft';
+	}
+	const staged = insertDailyTaskTree(markdown, `- [ ] ${anchorText}`);
+	const transformed = applyTaskEdit(
+		staged.markdown,
+		parseDailyNote(staged.markdown).tasks.find((task) => task.text === anchorText)!.lineIndex,
+		plan,
+	);
+	return {
+		markdown: transformed.markdown,
+		lineMapping: new Map(
+			[...staged.lineMapping].flatMap(([beforeLine, stagedLine]) => {
+				const afterLine = transformed.lineMapping.get(stagedLine);
+				if (afterLine === undefined) {
+					return [];
+				}
+				return [[beforeLine, afterLine]];
+			}),
+		),
+	};
 };
 
 class DailyLogStore {
@@ -118,30 +178,50 @@ class DailyLogStore {
 		);
 	}
 
-	async editTaskPlan(day: string, taskId: string, plan: TaskEditPlan): Promise<void> {
-		await this.update(
-			day,
-			(markdown) =>
-				applyTaskEdit(markdown, findDailyTask(markdown, taskId).lineIndex, plan).markdown,
-		);
+	async deleteTask(
+		day: string,
+		taskId: string,
+		mode: TaskDeleteMode,
+	): Promise<Map<string, string>> {
+		let mapping = new Map<string, string>();
+		await this.update(day, (markdown) => {
+			const transformed = applyTaskDelete(
+				markdown,
+				findDailyTask(markdown, taskId).lineIndex,
+				mode,
+			);
+			mapping = mapDailyTasks(parseDailyNote(markdown).tasks, transformed);
+			return transformed.markdown;
+		});
+		return mapping;
 	}
 
-	async addTaskPlan(day: string, plan: TaskEditPlan): Promise<void> {
-		if (!hasTaskEditContent(plan)) {
-			return;
-		}
+	async editTaskPlan(
+		day: string,
+		taskId: string,
+		plan: TaskEditPlan,
+	): Promise<Map<string, string>> {
+		let mapping = new Map<string, string>();
 		await this.update(day, (markdown) => {
-			const staged = addDailyTask(markdown, 'Draft');
-			const before = parseDailyNote(markdown).tasks;
-			const after = parseDailyNote(staged).tasks;
-			const index = after.findIndex(
-				(task, taskIndex) =>
-					taskIndex === before.length ||
-					task.lineIndex !== before[taskIndex]?.lineIndex ||
-					task.text !== before[taskIndex]?.text,
-			);
-			return applyTaskEdit(staged, after[index]!.lineIndex, plan).markdown;
+			const transformed = applyTaskEdit(markdown, findDailyTask(markdown, taskId).lineIndex, plan);
+			mapping = mapDailyTasks(parseDailyNote(markdown).tasks, transformed);
+			return transformed.markdown;
 		});
+		return mapping;
+	}
+
+	async addTaskPlan(day: string, plan: TaskEditPlan): Promise<Map<string, string>> {
+		if (!hasTaskEditContent(plan)) {
+			const snapshot = await this.read(day);
+			return new Map(snapshot.note?.tasks.map((task) => [task.id, task.id]));
+		}
+		let mapping = new Map<string, string>();
+		await this.update(day, (markdown) => {
+			const transformed = addDailyTaskPlan(markdown, plan);
+			mapping = mapDailyTasks(parseDailyNote(markdown).tasks, transformed);
+			return transformed.markdown;
+		});
+		return mapping;
 	}
 
 	async setTaskChecked(day: string, taskId: string, checked: boolean): Promise<void> {
@@ -162,5 +242,5 @@ class DailyLogStore {
 	}
 }
 
-export { DailyLogStore };
+export { addDailyTaskPlan, DailyLogStore };
 export type { DailyLogVault };

@@ -58,7 +58,12 @@ search results, and the daily log, including the task capture fields:
 Leaving the editor saves your work. Blank rows disappear when they lose focus;
 if a cleared parent has subitems, they move up one level. New blank drafts stay
 in the interface until they have text, so abandoned entries leave no empty task
-lines in the note. Ordinary **Delete task** still deletes the whole group.
+lines in the note. Right-click a task in Captain's Log, a project, or a queue
+to **Delete item** while keeping its children, or choose **Delete tree** to
+remove the whole group. The tree option appears when the task has subitems,
+even if a filter hides them. For linked tasks, both actions also delete the
+corresponding source and copies. Delete item preserves and promotes children;
+Delete tree removes the whole linked group.
 A failed save keeps the draft editable. If Tavern closes before a save fails,
 a recovery dialog keeps the unsaved task text available to copy as Markdown.
 
@@ -86,7 +91,14 @@ queue tasks cannot be dragged into the log separately. The source stays in its p
 standard Obsidian block IDs, such as `^tavern-a1b2`, to the linked task lines and
 saves their relationships in plugin settings. Checking or unchecking either
 copy updates the corresponding task in the other note, including changes made
-in Obsidian's Markdown editor. Task text remains independently editable.
+in Obsidian's Markdown editor.
+
+All task operations made in Tavern apply to the source and every linked copy:
+text edits, deletion, moves, nesting, and reordering. A task tree is a linked
+unit too: adding a subitem or nested group in any copy adds linked counterparts
+throughout the tree. If a move destination or section is missing from another
+linked note, Tavern creates its counterpart there. Tasks outside those linked
+units keep their own content.
 
 Completing a linked task moves its project source to `Done` and removes it from
 the open queues. Unchecking reopens it in its current project section; it does

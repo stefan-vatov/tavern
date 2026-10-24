@@ -14,7 +14,7 @@ related:
   - ../decisions/2026-10-24-task-keyboard-editing.md
 ---
 
-# Task editing
+# Task editing and deletion
 
 Project, queue, search-result, and daily-log task editors share the same keyboard
 behavior, including task capture fields. Ctrl+Enter creates a new sibling below
@@ -30,15 +30,15 @@ refreshes must preserve the active editor, its text, and keyboard focus.
 
 An empty row is removed when it loses focus. Its existing subitems survive and
 move up one level, retaining their relative nesting and order. This cleanup
-removes only that row; the ordinary Delete task action retains its existing
-whole-tree deletion behavior. Clearing a linked row removes that endpoint's
-relationship without deleting text in other notes; surviving child links remain
-intact. Task text edits do not propagate to linked copies.
+removes only that row, matching Delete item. Propagation to linked items follows
+the [linked-unit contract](daily-log.md); children that survive an item deletion
+retain their links.
 
 Edits preserve checkbox state, existing block IDs on surviving tasks, surrounding
 note content, and note line endings. Own edits preserve queue references to
-surviving tasks, including tasks shifted by new or removed lines. Missing or
-ambiguous targets and failed writes are visible failures. A failed edit keeps
+surviving tasks, including tasks shifted by new or removed lines. Pending actions
+in either pane remain bound to the same tasks when a linked write shifts rows
+in another note. Missing or ambiguous targets and failed writes are visible failures. A failed edit keeps
 the draft available for correction rather than silently discarding its text.
 If the view closes while a save fails, show the unsaved draft as copyable
 Markdown in a recovery dialog.
@@ -48,3 +48,27 @@ settings failure must leave the note untouched, so the same edit remains
 retryable. If the note write fails, restore the prior references. A failure of
 that restoration is itself a visible storage failure; this does not establish
 an atomic transaction with external editors.
+
+## Right-click deletion
+
+Captain's Log, project, available-task, focus-queue, and search-result rows offer
+**Delete item** in their context menu. It removes the selected task line and
+promotes its children one level, retaining their relative nesting and order.
+A row with task descendants additionally offers **Delete tree**, which removes
+the selected task and its complete nested group, including indented supporting
+content. Descendants are determined from the underlying note, even when a
+filter or queue selection hides them. Neither action removes adjacent siblings,
+headings, or unrelated note content.
+
+Deleting a queued item changes its source project note. The separate action to
+remove an item from the focus queue continues to change queue selection only.
+For linked tasks, deletion reaches the source and every copy under the
+[linked-unit contract](daily-log.md). Surviving child relationships and queue
+references remain valid. Settings and note-write failure behavior follows
+the same reference-save and rollback contract as editing.
+
+A menu opens only after active edits finish and a fresh note snapshot supplies
+its task identity and tree eligibility. Deletion actions are serialized, following
+its authoritative task-reference changes so a rename or inserted draft cannot
+cause deletion of a different task. Missing or ambiguous targets are visible
+failures rather than a reason to guess from task text.

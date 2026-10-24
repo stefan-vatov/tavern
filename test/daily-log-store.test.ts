@@ -98,6 +98,9 @@ describe('daily log vault storage', () => {
 			vault.files.set(path, before);
 			const store = makeStore(vault);
 			await expect(store.editTask(day, 'block:copy', 'Wrong edit')).rejects.toThrow('ambiguous');
+			for (const mode of ['task', 'tree'] as const) {
+				await expect(store.deleteTask(day, 'block:copy', mode)).rejects.toThrow('ambiguous');
+			}
 			await expect(
 				store.moveTask(day, 'block:copy', { taskId: 'block:other', placement: 'after' }),
 			).rejects.toThrow('ambiguous');
@@ -159,6 +162,104 @@ describe('daily log vault storage', () => {
 			'---\ntitle: Private log\n---\nFresh outside edit.\n### Plan\n- [ ] Other ^other\n- [x] Renamed ^parent\n  - [ ] Child ^child\n- [ ] Captured\n### Notes\nAn ordinary paragraph.\n',
 		);
 	});
+
+	it('returns authoritative daily references after clearing a parent and promoting its children', async () => {
+		const vault = new MemoryVault();
+		const store = makeStore(vault);
+		vault.files.set(
+			path,
+			'### Plan\n- [ ] Parent\n  - [x] Child ^child\n- [ ] Next\n### Notes\n- [ ] Later\n',
+		);
+		const mapping = await store.editTaskPlan(day, 'line:1', {
+			text: '',
+			children: [],
+			siblings: [],
+		});
+		expect(vault.files.get(path)).toBe(
+			'### Plan\n- [x] Child ^child\n- [ ] Next\n### Notes\n- [ ] Later\n',
+		);
+		expect([...mapping]).toEqual([
+			['line:1', ''],
+			['block:child', 'block:child'],
+			['line:3', 'line:2'],
+			['line:5', 'line:4'],
+		]);
+	});
+
+	it('maps existing daily drafts through capture staging and returns identity references for an empty capture', async () => {
+		const vault = new MemoryVault();
+		const store = makeStore(vault);
+		vault.files.set(
+			path,
+			'# Log\n## General\nProse.\n## Other\n\n- [ ] Draft\n  - [ ] Child ^child\n',
+		);
+		const process = vi.spyOn(vault, 'process');
+		const mapping = await store.addTaskPlan(day, {
+			text: 'Captured',
+			children: [{ text: 'Nested capture', children: [] }],
+			siblings: [{ text: 'Next capture', children: [] }],
+		});
+		expect(vault.files.get(path)).toBe(
+			'# Log\n## General\nProse.\n### Plan\n\n- [ ] Captured\n  - [ ] Nested capture\n- [ ] Next capture\n\n## Other\n\n- [ ] Draft\n  - [ ] Child ^child\n',
+		);
+		expect([...mapping]).toEqual([
+			['line:5', 'line:11'],
+			['block:child', 'block:child'],
+		]);
+		const identity = await store.addTaskPlan(day, { text: ' ', children: [], siblings: [] });
+		expect([...identity]).toEqual([
+			['line:5', 'line:5'],
+			['line:6', 'line:6'],
+			['line:7', 'line:7'],
+			['line:11', 'line:11'],
+			['block:child', 'block:child'],
+		]);
+		expect(process).toHaveBeenCalledTimes(1);
+	});
+
+	it.each(['task', 'tree'] as const)(
+		'deletes a daily %s from the current note and preserves content added after the last read',
+		async (mode) => {
+			const vault = new MemoryVault();
+			const store = makeStore(vault);
+			const source =
+				'### Plan\r\n- [ ] Parent ^parent\r\n  - [x] Child ^child\r\n- [ ] Next ^next\r\n### Notes\r\nNarrative.\r\n- [ ] Later';
+			vault.files.set(path, source);
+			await store.read(day);
+			vault.files.set(path, source.replace('### Plan', 'Outside edit.\r\n### Plan'));
+			vault.readError = new Error('Deletion must use the current vault process content.');
+			const mapping = await store.deleteTask(day, 'block:parent', mode);
+			let child = '';
+			let childId = '';
+			let laterId = 'line:5';
+			if (mode === 'task') {
+				childId = 'block:child';
+				laterId = 'line:6';
+				child = '- [x] Child ^child\r\n';
+			}
+			expect(vault.files.get(path)).toBe(
+				`Outside edit.\r\n### Plan\r\n${child}- [ ] Next ^next\r\n### Notes\r\nNarrative.\r\n- [ ] Later`,
+			);
+			expect([...mapping]).toEqual([
+				['block:parent', ''],
+				['block:child', childId],
+				['block:next', 'block:next'],
+				['line:7', laterId],
+			]);
+			const beforeFailure = vault.files.get(path);
+			await expect(store.deleteTask(day, 'block:parent', mode)).rejects.toThrow(
+				'Daily task was not found',
+			);
+			vault.writeError = new Error('Deletion write failed.');
+			await expect(store.deleteTask(day, 'block:next', mode)).rejects.toThrow(
+				'Deletion write failed',
+			);
+			expect(vault.files.get(path)).toBe(beforeFailure);
+			await expect(store.deleteTask('2026-10-25', 'block:next', mode)).rejects.toThrow(
+				'Daily note was not found',
+			);
+		},
+	);
 
 	it('rejects missing task identities and invalid transformations without changing the note', async () => {
 		const vault = new MemoryVault();

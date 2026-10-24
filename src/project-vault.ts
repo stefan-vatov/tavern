@@ -5,6 +5,7 @@ import {
 	addProjectTaskPlan,
 	completeProjectTask,
 	deleteProjectTask,
+	deleteProjectTaskPlan,
 	editProjectTask,
 	editProjectTaskPlan,
 	moveProjectTask,
@@ -19,7 +20,7 @@ import {
 	type ProjectSourceFile,
 } from './project-library';
 import type { ProjectTaskDropPlacement, ProjectTaskReorderDirection } from './project-note';
-import type { TaskEditPlan } from './task-edit';
+import type { TaskDeleteMode, TaskEditPlan } from './task-edit';
 
 type ProjectVaultFile = {
 	path: string;
@@ -105,6 +106,22 @@ const deleteVaultProjectTask = (
 	task: ProjectBoardTask | undefined,
 ): Effect.Effect<void, VaultActionError> =>
 	updateTaskSource(vault, task, (markdown, taskId) => deleteProjectTask(markdown, taskId));
+
+const deleteVaultProjectTaskPlan = (
+	vault: ProjectVault,
+	task: ProjectBoardTask | undefined,
+	mode: TaskDeleteMode,
+): Effect.Effect<Map<string, string>, VaultActionError> =>
+	Effect.gen(function* () {
+		if (!task) {
+			return yield* new ProjectVaultError({ message: 'Task was not provided.' });
+		}
+		return yield* updateProjectSourceResult(vault, task.projectPath, (markdown) =>
+			deleteProjectTaskPlan(markdown, task.id, mode).pipe(
+				Effect.map(({ markdown: next, mapping }) => ({ markdown: next, result: mapping })),
+			),
+		);
+	});
 
 const editVaultProjectTask = (
 	vault: ProjectVault,
@@ -268,6 +285,7 @@ export {
 	addVaultProjectTaskPlan,
 	completeVaultProjectTask,
 	deleteVaultProjectTask,
+	deleteVaultProjectTaskPlan,
 	editVaultProjectTask,
 	editVaultProjectTaskPlan,
 	loadVaultProjectLibrary,

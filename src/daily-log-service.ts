@@ -5,59 +5,38 @@ import type {
 	DailyLogDropTarget,
 	DailyLogSnapshot,
 } from './daily-log-controller';
-import { DailyLogStore } from './daily-log-store';
+import { addDailyTaskPlan, DailyLogStore } from './daily-log-store';
+import { addProjectTaskPlan } from './project-actions';
 import {
-	insertDailyTaskTree,
-	parseDailyNote,
-	setDailyTaskChecked,
-	type DailyTask,
-} from './daily-note';
-import {
-	addProjectTaskPlan,
-	editProjectTaskPlan,
-	setProjectTaskChecked,
-	type ProjectActionError,
-} from './project-actions';
-import type { TaskEditPlan } from './task-edit';
+	LinkedTaskOperations,
+	endpoints,
+	sameEndpoint,
+	type DailyTaskLink,
+	type TaskEndpoint,
+	type TaskReference,
+} from './linked-task-operations';
 import type { ProjectBoardTask } from './project-library';
-import { indentWidth, parseProjectNote } from './project-note';
+import type { ProjectTaskDropPlacement, ProjectTaskReorderDirection } from './project-note';
+import { hasTaskEditContent, type TaskDeleteMode, type TaskEditPlan } from './task-edit';
 
-type TaskEndpoint = { path: string; blockId: string };
-type DailyTaskLink = { source: TaskEndpoint; copies: TaskEndpoint[]; checked: boolean };
 type DailyLogServiceOptions = {
 	links: () => DailyTaskLink[];
 	saveLinks: (links: DailyTaskLink[]) => Promise<void>;
 	remapTaskKeys: (mapping: Map<string, string>) => Promise<() => Promise<void>>;
 };
 
-const sameEndpoint = (left: TaskEndpoint, right: TaskEndpoint): boolean =>
-	left.path === right.path && left.blockId === right.blockId;
-const endpoints = (link: DailyTaskLink): TaskEndpoint[] => [link.source, ...link.copies];
-
-function blockTask(markdown: string, blockId: string): DailyTask {
-	const matches = parseDailyNote(markdown).tasks.filter((task) => task.blockId === blockId);
-	const occurrences = markdown.split(/\r\n|\n|\r/).filter((line) => {
-		const suffix = line.match(/(?:^|\s)\^([A-Za-z0-9-]+)\s*$/);
-		return suffix?.[1] === blockId;
-	});
-	if (matches.length !== 1 || occurrences.length !== 1) {
-		throw new Error(`Linked task block ^${blockId} was missing or ambiguous.`);
-	}
-	return matches[0]!;
-}
-
-function nextBlockId(markdown: string, used: Set<string>): string {
-	const id = `tavern-${globalThis.crypto.randomUUID()}`;
-	if (used.has(id) || markdown.includes(`^${id}`)) {
-		throw new Error('Generated task block ID already exists.');
-	}
-	used.add(id);
-	return id;
-}
+const projectReference = (task: ProjectBoardTask): TaskReference => ({
+	path: task.projectPath,
+	id: task.id,
+	project: true,
+});
 
 class DailyLogService implements DailyLogController {
 	private pending: Promise<unknown> = Promise.resolve();
 	private disposed = false;
+	private readonly referenceListeners = new Set<
+		(path: string, mapping: Map<string, string>, kind: 'project' | 'daily') => void
+	>();
 
 	constructor(
 		private readonly store: DailyLogStore,
@@ -67,307 +46,258 @@ class DailyLogService implements DailyLogController {
 	today(): string {
 		return this.store.today();
 	}
-
 	read(day: string): Promise<DailyLogSnapshot> {
 		return this.enqueue(() => this.store.read(day));
 	}
-
 	create(day: string): Promise<void> {
 		return this.enqueue(() => this.store.create(day));
 	}
-
-	addTask(day: string, text: string): Promise<void> {
-		return this.enqueue(() => this.store.addTask(day, text));
+	async addTask(day: string, text: string): Promise<void> {
+		if (!text.trim()) {
+			throw new Error('Task text was empty.');
+		}
+		await this.addTaskPlan(day, { text, children: [], siblings: [] });
 	}
-
-	editTask(day: string, taskId: string, text: string): Promise<void> {
-		return this.enqueue(() => this.store.editTask(day, taskId, text));
-	}
-
-	addTaskPlan(day: string, plan: TaskEditPlan): Promise<void> {
-		return this.enqueue(() => this.store.addTaskPlan(day, plan));
-	}
-
-	editTaskPlan(day: string, taskId: string, plan: TaskEditPlan): Promise<void> {
+	addTaskPlan(day: string, plan: TaskEditPlan): Promise<Map<string, string>> {
 		return this.enqueue(async () => {
-			const links = structuredClone(this.options.links());
-			if (!plan.text.trim()) {
-				await this.unlinkRemovedTask(this.store.path(day), taskId);
+			if (!hasTaskEditContent(plan) && !(await this.store.read(day)).note) {
+				return new Map();
 			}
-			try {
-				await this.store.editTaskPlan(day, taskId, plan);
-			} catch (error) {
-				if (JSON.stringify(this.options.links()) !== JSON.stringify(links)) {
-					await this.options.saveLinks(links);
-				}
-				throw error;
-			}
+			const reference = { path: this.store.path(day), id: '' };
+			return this.operation(reference, async (engine) => {
+				const document = await engine.document(reference.path);
+				document.apply(addDailyTaskPlan(document.markdown(), plan));
+			});
 		});
 	}
 
-	editProjectTaskPlan(task: ProjectBoardTask, plan: TaskEditPlan): Promise<void> {
+	editTask(day: string, taskId: string, text: string): Promise<Map<string, string>> {
+		return this.editTaskPlan(day, taskId, { text, children: [], siblings: [] });
+	}
+
+	editTaskPlan(day: string, taskId: string, plan: TaskEditPlan): Promise<Map<string, string>> {
+		const reference = { path: this.store.path(day), id: taskId };
+		return this.enqueue(() => this.operation(reference, (engine) => engine.edit(reference, plan)));
+	}
+
+	editProjectTaskPlan(task: ProjectBoardTask, plan: TaskEditPlan): Promise<Map<string, string>> {
+		const reference = projectReference(task);
+		return this.enqueue(() => this.operation(reference, (engine) => engine.edit(reference, plan)));
+	}
+
+	addProjectTaskPlan(
+		projectPath: string,
+		sectionName: string,
+		plan: TaskEditPlan,
+	): Promise<Map<string, string>> {
+		const reference = { path: projectPath, id: '', project: true };
 		return this.enqueue(() =>
-			this.writeProjectTaskPlan(
-				task.projectPath,
-				(markdown) => editProjectTaskPlan(markdown, task.id, plan),
-				plan.text.trim() ? undefined : task.id,
-			),
-		);
-	}
-
-	addProjectTaskPlan(projectPath: string, sectionName: string, plan: TaskEditPlan): Promise<void> {
-		return this.enqueue(() =>
-			this.writeProjectTaskPlan(projectPath, (markdown) =>
-				addProjectTaskPlan(markdown, sectionName, plan),
-			),
-		);
-	}
-
-	private async writeProjectTaskPlan(
-		path: string,
-		prepare: (
-			markdown: string,
-		) => Effect.Effect<{ markdown: string; mapping: Map<string, string> }, ProjectActionError>,
-		removedId?: string,
-	): Promise<void> {
-		const file = this.requireFile(path);
-		const result = await Effect.runPromise(prepare(await this.store.vault.read(file)));
-		const links = structuredClone(this.options.links());
-		let undoKeys: (() => Promise<void>) | undefined = undefined;
-		try {
-			if (removedId) {
-				await this.unlinkRemovedTask(path, removedId);
-			}
-			const mapping = new Map(
-				[...result.mapping].map(([before, after]) => [
-					`${path}::${before}`,
-					after ? `${path}::${after}` : '',
-				]),
-			);
-			undoKeys = await this.options.remapTaskKeys(mapping);
-			this.assertActive();
-			await this.store.vault.modify(file, result.markdown);
-		} catch (error) {
-			try {
-				await undoKeys?.();
-			} finally {
-				if (JSON.stringify(this.options.links()) !== JSON.stringify(links)) {
-					await this.options.saveLinks(links);
-				}
-			}
-			throw error;
-		}
-	}
-
-	private async unlinkRemovedTask(path: string, taskId: string): Promise<void> {
-		if (!taskId.startsWith('block:')) {
-			return;
-		}
-		const removed = { path, blockId: taskId.slice('block:'.length) };
-		const links = this.options.links();
-		const next = links
-			.filter((link) => !sameEndpoint(link.source, removed))
-			.map((link) => ({
-				...link,
-				copies: link.copies.filter((copy) => !sameEndpoint(copy, removed)),
-			}))
-			.filter((link) => link.copies.length > 0);
-		if (JSON.stringify(next) !== JSON.stringify(links)) {
-			await this.options.saveLinks(next);
-		}
-	}
-
-	moveTask(day: string, sourceId: string, target: DailyLogDropTarget): Promise<void> {
-		return this.enqueue(() => this.store.moveTask(day, sourceId, target));
-	}
-
-	setTaskChecked(day: string, taskId: string, checked: boolean): Promise<void> {
-		return this.enqueue(async () => {
-			const path = this.store.path(day);
-			const link = this.options
-				.links()
-				.find((entry) =>
-					entry.copies.some((copy) => copy.path === path && `block:${copy.blockId}` === taskId),
+			this.operation(reference, async (engine) => {
+				const document = await engine.document(projectPath);
+				document.apply(
+					await Effect.runPromise(addProjectTaskPlan(document.markdown(), sectionName, plan)),
 				);
-			if (link) {
-				await this.propagate(link, checked);
-			} else {
-				await this.store.setTaskChecked(day, taskId, checked);
-			}
-		});
+			}),
+		);
+	}
+
+	deleteProjectTask(task: ProjectBoardTask, mode: TaskDeleteMode): Promise<Map<string, string>> {
+		const reference = projectReference(task);
+		return this.enqueue(() =>
+			this.operation(reference, (engine) => engine.delete(reference, mode)),
+		);
+	}
+
+	deleteTask(day: string, taskId: string, mode: TaskDeleteMode): Promise<Map<string, string>> {
+		const reference = { path: this.store.path(day), id: taskId };
+		return this.enqueue(() =>
+			this.operation(reference, (engine) => engine.delete(reference, mode)),
+		);
+	}
+
+	moveTask(
+		day: string,
+		sourceId: string,
+		target: DailyLogDropTarget,
+	): Promise<Map<string, string>> {
+		const reference = { path: this.store.path(day), id: sourceId };
+		return this.enqueue(() =>
+			this.operation(reference, (engine) =>
+				engine.move(reference, { path: reference.path, id: target.taskId }, target.placement),
+			),
+		);
+	}
+
+	moveProjectTask(task: ProjectBoardTask, sectionName: string): Promise<Map<string, string>> {
+		const reference = projectReference(task);
+		return this.enqueue(() =>
+			this.operation(reference, (engine) => engine.section(reference, sectionName)),
+		);
+	}
+
+	moveProjectTaskToPosition(
+		source: ProjectBoardTask,
+		target: ProjectBoardTask,
+		placement: ProjectTaskDropPlacement,
+	): Promise<Map<string, string>> {
+		const reference = projectReference(source);
+		return this.enqueue(() =>
+			this.operation(reference, (engine) =>
+				engine.move(reference, projectReference(target), placement),
+			),
+		);
+	}
+
+	reorderProjectTask(
+		task: ProjectBoardTask,
+		direction: ProjectTaskReorderDirection,
+	): Promise<Map<string, string>> {
+		const reference = projectReference(task);
+		return this.enqueue(() =>
+			this.operation(reference, (engine) => engine.reorder(reference, direction)),
+		);
+	}
+
+	setTaskChecked(day: string, taskId: string, checked: boolean): Promise<Map<string, string>> {
+		const reference = { path: this.store.path(day), id: taskId };
+		return this.enqueue(() =>
+			this.operation(reference, (engine) => engine.checked(reference, checked)),
+		);
+	}
+
+	setProjectTaskChecked(task: ProjectBoardTask, checked: boolean): Promise<Map<string, string>> {
+		const reference = projectReference(task);
+		return this.enqueue(() =>
+			this.operation(reference, (engine) => engine.checked(reference, checked)),
+		);
 	}
 
 	isLinked(task: ProjectBoardTask): boolean {
 		return this.options
 			.links()
-			.some(
-				(link) =>
-					link.source.path === task.projectPath && `block:${link.source.blockId}` === task.id,
+			.some((link) =>
+				endpoints(link).some(
+					(endpoint) =>
+						endpoint.path === task.projectPath && `block:${endpoint.blockId}` === task.id,
+				),
 			);
 	}
 
-	setProjectTaskChecked(task: ProjectBoardTask, checked: boolean): Promise<void> {
-		return this.enqueue(async () => {
-			const link = this.options
-				.links()
-				.find(
-					(entry) =>
-						entry.source.path === task.projectPath && `block:${entry.source.blockId}` === task.id,
-				);
-			if (!link) {
-				throw new Error('Project task was not linked to a daily note.');
-			}
-			await this.propagate(link, checked);
-		});
-	}
-
 	copyProjectTask(day: string, task: ProjectBoardTask, target?: DailyLogDropTarget): Promise<void> {
+		const reference = projectReference(task);
 		return this.enqueue(async () => {
-			const destination = this.store.path(day);
-			const file = this.requireFile(destination);
-			const existing = await this.store.vault.read(file);
-			if (target) {
-				this.dropLine(existing, target);
+			await this.operation(reference, (engine) =>
+				engine.copy(
+					reference,
+					this.store.path(day),
+					target ? { id: target.taskId, placement: target.placement } : undefined,
+				),
+			);
+		});
+	}
+
+	private async operation(
+		reference: TaskReference,
+		prepare: (engine: LinkedTaskOperations) => Promise<void>,
+	): Promise<Map<string, string>> {
+		const originalLinks = structuredClone(this.options.links());
+		const engine = new LinkedTaskOperations(this.store.vault, originalLinks);
+		await prepare(engine);
+		const origin = await engine.document(reference.path);
+		const mapping = origin.mapping(reference.project);
+		const changed = [...engine.documents.values()].filter(
+			(document) => document.original !== document.markdown(),
+		);
+		const queueMapping = new Map<string, string>();
+		for (const document of [...engine.documents.values()].filter(
+			(candidate) => candidate.isProject,
+		)) {
+			for (const [before, after] of document.mapping(true)) {
+				queueMapping.set(`${document.path}::${before}`, after ? `${document.path}::${after}` : '');
 			}
-			const originalLinks = structuredClone(this.options.links());
-			const prepared = await this.prepareCopy(task, destination, existing);
-			await this.options.remapTaskKeys(prepared.mapping);
+		}
+		for (const document of changed) {
+			if ((await this.store.vault.read(this.requireFile(document.path))) !== document.original) {
+				throw new Error(`Note changed while preparing the task operation: ${document.path}`);
+			}
+		}
+		const written: typeof changed = [];
+		let undoKeys: (() => Promise<void>) | undefined = undefined;
+		let savedLinks = false;
+		try {
 			this.assertActive();
-			await this.options.saveLinks(prepared.links);
-			try {
+			if (JSON.stringify(engine.links) !== JSON.stringify(originalLinks)) {
+				await this.options.saveLinks(engine.links);
+				savedLinks = true;
+			}
+			if (queueMapping.size) {
+				undoKeys = await this.options.remapTaskKeys(queueMapping);
+			}
+			for (const document of changed) {
 				this.assertActive();
-				await this.store.vault.process(file, (markdown) => {
-					for (const copied of parseDailyNote(prepared.markdown).tasks) {
-						if (copied.blockId && markdown.includes(`^${copied.blockId}`)) {
-							throw new Error('Copied task block ID already exists in the destination.');
-						}
-					}
-					return insertDailyTaskTree(
-						markdown,
-						prepared.markdown,
-						target ? this.dropLine(markdown, target) : undefined,
-					);
-				});
-			} catch (error) {
-				await this.options.saveLinks(originalLinks);
-				throw error;
+				await this.store.vault.modify(this.requireFile(document.path), document.markdown());
+				written.push(document);
 			}
-		});
+		} catch (error) {
+			const failures: unknown[] = [];
+			for (const document of written.reverse()) {
+				try {
+					await this.store.vault.modify(this.requireFile(document.path), document.original);
+				} catch (failure) {
+					failures.push(failure);
+				}
+			}
+			try {
+				await undoKeys?.();
+			} catch (failure) {
+				failures.push(failure);
+			}
+			if (savedLinks) {
+				try {
+					await this.options.saveLinks(originalLinks);
+				} catch (failure) {
+					failures.push(failure);
+				}
+			}
+			if (failures.length) {
+				throw Object.assign(
+					new Error(
+						[error, ...failures]
+							.map((failure) => (failure instanceof Error ? failure.message : String(failure)))
+							.join('; '),
+					),
+					{ cause: error },
+				);
+			}
+			throw error;
+		}
+		for (const document of engine.documents.values()) {
+			this.publishReferences(document.path, document.mapping(), 'daily');
+			if (document.isProject) {
+				this.publishReferences(document.path, document.mapping(true), 'project');
+			}
+		}
+		return mapping;
 	}
 
-	private async prepareCopy(
-		task: ProjectBoardTask,
-		destination: string,
-		destinationMarkdown: string,
-	): Promise<{
-		markdown: string;
-		mapping: Map<string, string>;
-		links: DailyTaskLink[];
-	}> {
-		const mapping = new Map<string, string>();
-		const links = structuredClone(this.options.links());
-		let copied = '';
-		await this.store.vault.process(this.requireFile(task.projectPath), (markdown) => {
-			const note = Effect.runSync(parseProjectNote(markdown));
-			const located = note.sections
-				.flatMap((section) => section.tasks)
-				.filter((candidate) => candidate.id === task.id);
-			if (located.length !== 1) {
-				throw new Error('Source project task was missing or ambiguous.');
-			}
-			const root = located[0]!;
-			let start = note.frontmatterLines.length + note.preambleLines.length;
-			for (const section of note.sections) {
-				start += 1;
-				if (section.tasks.includes(root)) {
-					start += root.lineIndex;
-					break;
-				}
-				start += section.lines.length;
-			}
-			const lines = Array.from(markdown.matchAll(/([^\r\n]*)(\r\n|\n|\r|$)/g))
-				.filter((match) => match[0] !== '')
-				.map((match) => ({ raw: match[1]!, ending: match[2]! }));
-			let end = start + 1;
-			while (end < lines.length) {
-				const { raw } = lines[end]!;
-				if (
-					raw.trim() &&
-					indentWidth(raw.match(/^[\t ]*/)?.[0] ?? '') <= indentWidth(root.indent)
-				) {
-					break;
-				}
-				end += 1;
-			}
-			const used = new Set<string>();
-			const copyLines: string[] = [];
-			const sourceTasks = note.sections.find((section) => section.tasks.includes(root))!.tasks;
-			for (let index = start; index < end; index += 1) {
-				const line = lines[index]!;
-				const [parsed] = parseDailyNote(line.raw).tasks;
-				if (!parsed) {
-					copyLines.push(line.raw);
-					continue;
-				}
-				let sourceId = parsed.blockId;
-				if (sourceId) {
-					blockTask(markdown, sourceId);
-				} else {
-					sourceId = nextBlockId(`${markdown}\n${destinationMarkdown}`, used);
-					const oldTask = sourceTasks.find(
-						(candidate) => candidate.lineIndex === root.lineIndex + index - start,
-					);
-					if (!oldTask) {
-						throw new Error('Source task identity could not be resolved.');
-					}
-					mapping.set(
-						`${task.projectPath}::${oldTask.id}`,
-						`${task.projectPath}::block:${sourceId}`,
-					);
-					line.raw += ` ^${sourceId}`;
-				}
-				const copyId = nextBlockId(`${markdown}\n${destinationMarkdown}`, used);
-				copyLines.push(line.raw.replace(/\s*\^[A-Za-z0-9-]+\s*$/, ` ^${copyId}`));
-				const source = { path: task.projectPath, blockId: sourceId };
-				const copy = { path: destination, blockId: copyId };
-				const link = links.find((entry) => sameEndpoint(entry.source, source));
-				if (link) {
-					link.copies.push(copy);
-				} else {
-					links.push({ source, copies: [copy], checked: parsed.checked });
-				}
-			}
-			copied = copyLines.join('\n');
-			return lines.map((line) => line.raw + line.ending).join('');
-		});
-		return { markdown: copied, mapping, links };
+	private async readChecked(endpoint: TaskEndpoint): Promise<boolean> {
+		const engine = new LinkedTaskOperations(this.store.vault, this.options.links());
+		return (await engine.document(endpoint.path)).block(endpoint.blockId).checked;
 	}
 
-	private dropLine(
-		markdown: string,
-		target: DailyLogDropTarget,
-	): { lineIndex: number; placement: DailyLogDropTarget['placement'] } {
-		if (target.taskId.startsWith('block:')) {
-			blockTask(markdown, target.taskId.slice('block:'.length));
-		}
-		const matches = parseDailyNote(markdown).tasks.filter((task) => task.id === target.taskId);
-		if (matches.length !== 1) {
-			throw new Error('Daily drop target was missing or ambiguous.');
-		}
-		return { lineIndex: matches[0]!.lineIndex, placement: target.placement };
+	private async synchronize(link: DailyTaskLink, checked: boolean): Promise<void> {
+		const reference = { path: link.source.path, id: `block:${link.source.blockId}` };
+		await this.operation(reference, (engine) => engine.checked(reference, checked, false));
 	}
 
 	syncFile(path: string): Promise<void> {
 		return this.enqueue(async () => {
 			for (const link of this.options.links()) {
 				const changed = endpoints(link).filter((endpoint) => endpoint.path === path);
-				if (changed.length === 0) {
-					continue;
-				}
 				const states = await Promise.all(changed.map((endpoint) => this.readChecked(endpoint)));
 				const delta = states.find((checked) => checked !== link.checked);
 				if (delta !== undefined) {
-					await this.propagate(link, delta);
+					await this.synchronize(link, delta);
 				}
 			}
 		});
@@ -381,37 +311,10 @@ class DailyLogService implements DailyLogController {
 				);
 				const delta = states.find((checked) => checked !== link.checked);
 				if (delta !== undefined) {
-					await this.propagate(link, delta);
+					await this.synchronize(link, delta);
 				}
 			}
 		});
-	}
-
-	private async readChecked(endpoint: TaskEndpoint): Promise<boolean> {
-		const markdown = await this.store.vault.read(this.requireFile(endpoint.path));
-		return blockTask(markdown, endpoint.blockId).checked;
-	}
-
-	private async propagate(link: DailyTaskLink, checked: boolean): Promise<void> {
-		await Promise.all(endpoints(link).map((endpoint) => this.readChecked(endpoint)));
-		for (const endpoint of endpoints(link)) {
-			this.assertActive();
-			await this.store.vault.process(this.requireFile(endpoint.path), (markdown) => {
-				const task = blockTask(markdown, endpoint.blockId);
-				if (sameEndpoint(endpoint, link.source)) {
-					return Effect.runSync(
-						setProjectTaskChecked(markdown, `block:${endpoint.blockId}`, checked),
-					);
-				}
-				return setDailyTaskChecked(markdown, task.lineIndex, checked);
-			});
-		}
-		this.assertActive();
-		await this.options.saveLinks(
-			this.options
-				.links()
-				.map((entry) => (sameEndpoint(entry.source, link.source) ? { ...entry, checked } : entry)),
-		);
 	}
 
 	renameFile(oldPath: string, newPath: string): Promise<void> {
@@ -433,7 +336,7 @@ class DailyLogService implements DailyLogController {
 				const mapping = new Map<string, string>();
 				for (const link of current) {
 					const next = rename(link.source);
-					if (next.path !== link.source.path) {
+					if (!sameEndpoint(next, link.source)) {
 						mapping.set(
 							`${link.source.path}::block:${link.source.blockId}`,
 							`${next.path}::block:${next.blockId}`,
@@ -446,8 +349,36 @@ class DailyLogService implements DailyLogController {
 		});
 	}
 
+	onTaskReferencesChanged(
+		listener: (path: string, mapping: Map<string, string>, kind: 'project' | 'daily') => void,
+	): () => void {
+		this.referenceListeners.add(listener);
+		return () => {
+			this.referenceListeners.delete(listener);
+		};
+	}
+
+	private publishReferences(
+		path: string,
+		mapping: Map<string, string>,
+		kind: 'project' | 'daily',
+	): void {
+		for (const listener of this.referenceListeners) {
+			try {
+				listener(path, new Map(mapping), kind);
+			} catch (error) {
+				// eslint-disable-next-line eslint/no-console
+				console.error('Tavern: task reference listener failed.', error);
+			}
+		}
+	}
+
+	async whenIdle(): Promise<void> {
+		await this.pending;
+	}
 	dispose(): void {
 		this.disposed = true;
+		this.referenceListeners.clear();
 	}
 
 	private requireFile(path: string): { path: string } {

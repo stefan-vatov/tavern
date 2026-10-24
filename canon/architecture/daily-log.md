@@ -13,6 +13,7 @@ related:
   - ./persistence.md
   - ./project-workflow.md
   - ../decisions/2026-10-24-linked-daily-tasks.md
+  - ../decisions/2026-10-25-linked-task-operations.md
 ---
 
 # Daily log
@@ -45,6 +46,8 @@ visible indentation. A child drop must produce a child even when the note mixes
 tabs and spaces, preserving the existing children's indentation and the moved
 tree's relative nesting. Before/after drops adopt the target's sibling level.
 A task cannot be moved inside its own descendants.
+Linked trees cannot be copied beneath themselves or their descendant
+counterparts; a separate sibling copy remains valid.
 
 ## Copies and stable references
 
@@ -59,8 +62,32 @@ identity and adds a distinct copy endpoint.
 
 The block ID, rather than task text or line position, identifies a linked task.
 Editing or reordering a task while retaining its ID preserves that identity.
-Task text is independently editable in each note; only checkbox state is
-synchronized. Markdown remains usable without Tavern.
+Tavern treats linked endpoints as representations of the same task. Markdown
+remains usable without Tavern.
+
+## Linked units and Tavern operations
+
+Every task operation performed in Tavern affects the source and every linked
+copy. This includes text edits, checking and unchecking, item/tree deletion,
+adding subitems or nested groups, moving, nesting, and reordering. A standalone
+task is one unit; a parent and its task tree are also a unit. Additions inside a
+linked tree acquire distinct endpoint block IDs and links, and appear in every
+counterpart tree. Operations may start from any endpoint, including a daily copy.
+
+Delete item removes the corresponding row everywhere and promotes surviving
+children. Delete tree removes the selected group and its linked counterparts.
+Removing references is part of deletion; it must not leave links pointing at
+deleted task lines. Tasks outside the affected units and surrounding note
+content remain intact.
+
+A structural move resolves destinations by linked identity, not matching text.
+If a destination task, required ancestor, or section is absent in another linked
+note, Tavern creates the matching destination there and links task counterparts.
+Moving or reordering a parent carries its complete tree.
+
+Capturing a standalone task without a linked anchor does not invent peers in
+other notes. Queue selection and focus-queue ordering remain plugin-owned view
+state; removing a queue selection is distinct from deleting the task.
 
 ## Checkbox synchronization and failures
 
@@ -82,10 +109,16 @@ to `Done` and leaves the open global and focus queues. Unchecking changes the
 project checkbox in place, making the task available as open work again. It
 does not restore a previous section or focus-queue selection.
 
-A missing note, missing block ID, or ambiguous ID is a visible synchronization
-failure. Tavern must not guess an endpoint from matching text. Note rename
-events update stored endpoint paths. Linked writes use current note content,
-but synchronization across multiple notes is not an atomic transaction;
-a failed write can leave a partially applied operation. No conflict-resolution,
+Registered endpoints must be validated before a linked Tavern operation writes
+notes. A missing note, missing block ID, or ambiguous ID is a visible
+synchronization failure. Tavern must not guess an endpoint from matching text. Note rename
+events update stored endpoint paths. Linked writes use current note content. Tavern prepares its note and reference
+changes together; failed settings saves must precede any note changes, and a
+failed note write triggers attempts to restore affected notes and references.
+Rollback failures remain visible. Synchronization across multiple notes is not
+an atomic transaction; failed writes or rollback can leave partial changes. No conflict-resolution,
 retry, or recovery policy for concurrent external edits or Obsidian Sync is
 established by this feature. The persistence page retains those policy gaps.
+The all-operation rule applies to Tavern actions; arbitrary external Markdown
+text or structure changes are not automatically replayed. Existing synchronization
+of external checkbox edits remains required.

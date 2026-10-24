@@ -3,6 +3,7 @@ import { parseDailyNote } from './daily-note';
 
 type TaskEditTree = { text: string; children: TaskEditTree[] };
 type TaskEditPlan = { text: string; children: TaskEditTree[]; siblings: TaskEditTree[] };
+type TaskDeleteMode = 'task' | 'tree';
 type TaskEditResult = { markdown: string; lineMapping: Map<number, number> };
 type EditLine = { raw: string; ending: string; original?: number };
 
@@ -35,15 +36,47 @@ function hasTaskEditContent(plan: TaskEditPlan): boolean {
 	return [{ text: plan.text, children: plan.children }, ...plan.siblings].some(hasText);
 }
 
+function readEditLines(markdown: string): EditLine[] {
+	return Array.from(markdown.matchAll(/([^\r\n]*)(\r\n|\n|\r|$)/g))
+		.filter((match) => match[0] !== '')
+		.map((match, original) => ({ raw: match[1] ?? '', ending: match[2] ?? '', original }));
+}
+
+function taskHasChildren(markdown: string, lineIndex: number): boolean {
+	const { tasks } = parseDailyNote(markdown);
+	const task = tasks.find((candidate) => candidate.lineIndex === lineIndex);
+	if (!task) {
+		return false;
+	}
+	const end = subtreeEnd(readEditLines(markdown), lineIndex, task.indent);
+	return tasks.some((candidate) => candidate.lineIndex > lineIndex && candidate.lineIndex < end);
+}
+
 function subtreeEnd(lines: EditLine[], lineIndex: number, indent: string): number {
 	let end = lineIndex + 1;
+	let fence: { marker: string; length: number } | undefined = undefined;
 	for (let index = end; index < lines.length; index += 1) {
 		const { raw } = lines[index]!;
+		const fenceMatch = raw.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+		if (fence) {
+			end = index + 1;
+			if (
+				fenceMatch?.[1]?.[0] === fence.marker &&
+				fenceMatch[1].length >= fence.length &&
+				!fenceMatch[2]?.trim()
+			) {
+				fence = undefined;
+			}
+			continue;
+		}
 		if (!raw.trim()) {
 			continue;
 		}
-		if (width(raw.match(/^[\t ]*/)?.[0] ?? '') <= width(indent)) {
+		if (/^ {0,3}#{1,6}\s+/.test(raw) || width(raw.match(/^[\t ]*/)?.[0] ?? '') <= width(indent)) {
 			break;
+		}
+		if (fenceMatch) {
+			fence = { marker: fenceMatch[1]![0]!, length: fenceMatch[1]!.length };
 		}
 		end = index + 1;
 	}
@@ -78,9 +111,7 @@ function applyTaskEdit(markdown: string, lineIndex: number, plan: TaskEditPlan):
 	if (!task) {
 		throw new Error(`Task was not found at line ${lineIndex}.`);
 	}
-	const lines: EditLine[] = Array.from(markdown.matchAll(/([^\r\n]*)(\r\n|\n|\r|$)/g))
-		.filter((match) => match[0] !== '')
-		.map((match, original) => ({ raw: match[1] ?? '', ending: match[2] ?? '', original }));
+	const lines = readEditLines(markdown);
 	const finalEnding = lines.at(-1)!.ending;
 	const ending = lines[lineIndex]!.ending || lines.find((line) => line.ending)?.ending || '\n';
 	const end = subtreeEnd(lines, lineIndex, task.indent);
@@ -139,5 +170,31 @@ function applyTaskEdit(markdown: string, lineIndex: number, plan: TaskEditPlan):
 	return { markdown: lines.map((line) => line.raw + line.ending).join(''), lineMapping };
 }
 
-export { applyTaskEdit, hasTaskEditContent };
-export type { TaskEditPlan, TaskEditTree };
+function applyTaskDelete(
+	markdown: string,
+	lineIndex: number,
+	mode: TaskDeleteMode,
+): TaskEditResult {
+	if (mode === 'task') {
+		return applyTaskEdit(markdown, lineIndex, { text: '', children: [], siblings: [] });
+	}
+	const task = parseDailyNote(markdown).tasks.find(
+		(candidate) => candidate.lineIndex === lineIndex,
+	);
+	if (!task) {
+		throw new Error(`Task was not found at line ${lineIndex}.`);
+	}
+	const lines = readEditLines(markdown);
+	const finalEnding = lines.at(-1)!.ending;
+	lines.splice(lineIndex, subtreeEnd(lines, lineIndex, task.indent) - lineIndex);
+	if (lines.length) {
+		lines.at(-1)!.ending = finalEnding;
+	}
+	return {
+		markdown: lines.map((line) => line.raw + line.ending).join(''),
+		lineMapping: new Map(lines.map((line, index) => [line.original!, index])),
+	};
+}
+
+export { applyTaskDelete, applyTaskEdit, hasTaskEditContent, taskHasChildren };
+export type { TaskDeleteMode, TaskEditPlan, TaskEditResult, TaskEditTree };

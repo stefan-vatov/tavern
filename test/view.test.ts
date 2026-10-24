@@ -556,10 +556,64 @@ const createDailyController = (markdown: string | null = DAILY_MARKDOWN) => ({
 	editTask: vi.fn(async () => {}),
 	addTaskPlan: vi.fn(async () => {}),
 	editTaskPlan: vi.fn(async () => {}),
+	deleteTask: vi.fn(async () => {}),
 	setTaskChecked: vi.fn(async () => {}),
 	moveTask: vi.fn(async () => {}),
 	copyProjectTask: vi.fn(async () => {}),
 });
+
+const taskMutationView = async (surface: 'project' | 'daily') => {
+	const paths = { project: '04_Projects/Pi.md', daily: 'logs/2026/10/2026-10-24.md' };
+	const headers = {
+		project: '---\ntavern: project\n---\n# Pi\n## Backlog\n',
+		daily: '# Log\n### Plan\n',
+	};
+	const path = paths[surface];
+	const files: Record<string, string> = {
+		[path]: `${headers[surface]}- [ ] A\n- [ ] B\n- [ ] C\n`,
+	};
+	const vault = {
+		...createVault(files),
+		getAbstractFileByPath: (requested: string) => {
+			if (files[requested] === undefined) {
+				return null;
+			}
+			return { path: requested };
+		},
+		create: vi.fn(),
+		createFolder: vi.fn(),
+		process: async (file: ProjectVaultFile, transform: (markdown: string) => string) => {
+			await vault.modify(file, transform(files[file.path]!));
+			return files[file.path]!;
+		},
+	};
+	const service = new DailyLogService(
+		new DailyLogStore(
+			vault,
+			() => 'logs',
+			() => new Date('2026-10-24T12:00:00'),
+		),
+		{ links: () => [], saveLinks: vi.fn(), remapTaskKeys: vi.fn(async () => async () => {}) },
+	);
+	const view = new TavernView({} as never, {
+		dailyLogs: service,
+		vault,
+		saveSettings: vi.fn(),
+		settings: { boardTaskKeys: [], projectFolders: ['04_Projects'], tavernName: 'Tavern' },
+	});
+	if (surface === 'project') {
+		await view.setState({ mode: 'note', selectedPath: path }, { history: false });
+	} else {
+		await view.onOpen();
+	}
+	const root = rootElements.at(-1)!;
+	const labels = { project: 'Complete', daily: 'Mark' };
+	const suffixes = { project: '', daily: ' complete' };
+	const row = (text: string) =>
+		findByAriaLabel(root, `${labels[surface]} ${text}${suffixes[surface]}`)?.parent;
+	await vi.waitFor(() => expect(row('A')).toBeDefined());
+	return { view, root, files, path, vault, row };
+};
 
 const dailyView = (dailyLogs: DailyLogController) =>
 	new TavernView({} as never, {
@@ -1391,9 +1445,10 @@ tavern: project
 		checkbox.checked = false;
 		checkbox.dispatch('change');
 		taskEl.dispatch('contextmenu', { preventDefault: vi.fn(), stopPropagation: vi.fn() });
+		await vi.waitFor(() => expect(menuItems.length).toBeGreaterThan(0));
 
 		expect(showMenuMock).toHaveBeenCalledTimes(1);
-		expect(menuItems.map((item) => item.title)).toEqual(['Delete task', 'Add to global queue']);
+		expect(menuItems.map((item) => item.title)).toEqual(['Delete item', 'Add to global queue']);
 	});
 
 	it('should show queued state in the global search overlay', async () => {
@@ -2191,6 +2246,7 @@ tavern: project
 		}
 
 		taskEl.dispatch('contextmenu', { preventDefault: vi.fn(), stopPropagation: vi.fn() });
+		await vi.waitFor(() => expect(menuItems.length).toBeGreaterThan(0));
 		expect(showMenuMock).toHaveBeenCalledTimes(1);
 		expect(menuItems.at(-1)?.title).toBe('Add to global queue');
 
@@ -2223,6 +2279,7 @@ tavern: project
 		}
 
 		taskEl.dispatch('contextmenu', { preventDefault: vi.fn(), stopPropagation: vi.fn() });
+		await vi.waitFor(() => expect(menuItems.length).toBeGreaterThan(0));
 		expect(showMenuMock).toHaveBeenCalledTimes(1);
 		expect(menuItems.at(-1)?.title).toBe('Remove from global queue');
 
@@ -2255,6 +2312,7 @@ tavern: project
 		}
 
 		taskEl.dispatch('contextmenu', { preventDefault: vi.fn(), stopPropagation: vi.fn() });
+		await vi.waitFor(() => expect(menuItems.length).toBeGreaterThan(0));
 		expect(menuItems.at(-1)?.title).toBe('Add to global queue');
 
 		menuItems.at(-1)?.callback?.();
@@ -2288,7 +2346,8 @@ tavern: project
 		}
 
 		taskEl.dispatch('contextmenu', { preventDefault: vi.fn(), stopPropagation: vi.fn() });
-		const deleteItem = menuItems.find((item) => item.title === 'Delete task');
+		await vi.waitFor(() => expect(menuItems.length).toBeGreaterThan(0));
+		const deleteItem = menuItems.find((item) => item.title === 'Delete item');
 		if (!deleteItem) {
 			throw new Error('delete menu item was not rendered');
 		}
@@ -2301,6 +2360,416 @@ tavern: project
 		expect(settings.boardTaskKeys).toEqual([]);
 		expect(textValues(rootElements.at(-1) as FakeElement)).not.toContain('Build board');
 	});
+
+	it.each(
+		['project', 'global', 'focus', 'search'].flatMap((surface) =>
+			['Delete item', 'Delete tree'].map((action) => ({ surface, action })),
+		),
+	)(
+		'offers deletion from the $surface menu and persists $action with the surviving queue selections',
+		async ({ surface, action }) => {
+			const path = '04_Projects/Pi.md';
+			const files = { [path]: NESTED_MARKDOWN };
+			const before = await Effect.runPromise(parseProjectNote(files[path]));
+			const settings = {
+				boardTaskKeys: before.sections[0]!.tasks.map((task) => `${path}::${task.id}`),
+				projectFolders: ['04_Projects'],
+				tavernName: 'Tavern',
+			};
+			const view = new TavernView({} as never, {
+				saveSettings: vi.fn(),
+				settings,
+				vault: createVault(files),
+			});
+			if (surface === 'project') {
+				await view.setState({ mode: 'note', selectedPath: path }, { history: false });
+			} else {
+				await view.onOpen();
+			}
+			const root = rootElements.at(-1)!;
+			const classes: Record<string, string> = {
+				project: 'tavern-project-task',
+				global: 'tavern-global-task',
+				focus: 'tavern-focus-task',
+				search: 'tavern-search-task',
+			};
+			const row = (text: string) =>
+				findAllByAriaLabel(root, `Complete ${text}`).find((checkbox) =>
+					checkbox.parent?.classes.has(classes[surface]!),
+				)?.parent;
+			const filterLabel: Record<string, string> = {
+				project: 'Filter project tasks',
+				global: 'Filter global tasks',
+				focus: 'Filter global tasks',
+				search: 'Search tasks',
+			};
+			const filter = () => findByAriaLabel(root, filterLabel[surface]!)!;
+			if (surface === 'search') {
+				filter().value = 'Next';
+				filter().dispatch('input');
+			}
+			row('Next task')!.dispatch('contextmenu');
+			await vi.waitFor(() => expect(menuItems.length).toBeGreaterThan(0));
+			expect(menuItems.map((item) => item.title)).toEqual([
+				'Delete item',
+				'Remove from global queue',
+			]);
+			menuItems.length = 0;
+			filter().value = 'Parent';
+			filter().dispatch('input');
+			expect(row('Child task')).toBeUndefined();
+			if (surface === 'project') {
+				findByAriaLabel(root, 'Edit Parent task')!.dispatch('click');
+				findByAriaLabel(root, 'Task text for Parent task')!.value = 'Renamed parent';
+			}
+			row('Parent task')!.dispatch('contextmenu');
+			await vi.waitFor(() => expect(menuItems.length).toBeGreaterThan(0));
+			expect(menuItems.map((item) => item.title)).toEqual([
+				'Delete item',
+				'Delete tree',
+				'Remove from global queue',
+			]);
+			menuItems.find((item) => item.title === action)!.callback!();
+			await vi.waitFor(() => {
+				expect(files[path]).not.toContain('Parent task');
+				expect(files[path]).not.toContain('Renamed parent');
+			});
+			if (action === 'Delete item') {
+				expect(files[path]).toContain('- [ ] Child task\n  - [ ] Grandchild task\n- [ ] Next task');
+			} else {
+				expect(files[path]).not.toContain('Child task');
+				expect(files[path]).not.toContain('Grandchild task');
+				expect(files[path]).toContain('- [ ] Next task');
+			}
+			const after = await Effect.runPromise(parseProjectNote(files[path]));
+			await vi.waitFor(() =>
+				expect(settings.boardTaskKeys).toEqual(
+					after.sections[0]!.tasks.map((task) => `${path}::${task.id}`),
+				),
+			);
+			await view.onClose();
+		},
+	);
+
+	it.each(['project', 'daily'] as const)(
+		'serializes rapid %s deletions while a previous write shifts the next row identity',
+		async (surface) => {
+			const { view, files, path, vault, row } = await taskMutationView(surface);
+			let releaseWrite: (() => void) | undefined = undefined;
+			// eslint-disable-next-line promise/avoid-new -- hold real note I/O to exercise overlapping user actions.
+			const firstWrite = new Promise<void>((resolve) => {
+				releaseWrite = resolve;
+			});
+			vault.modify.mockImplementationOnce(async (file, markdown) => {
+				await firstWrite;
+				files[file.path] = markdown;
+			});
+			row('A')!.dispatch('contextmenu');
+			await vi.waitFor(() => expect(menuItems.length).toBeGreaterThan(0));
+			menuItems.find((item) => item.title === 'Delete item')!.callback!();
+			await vi.waitFor(() => expect(vault.modify).toHaveBeenCalledOnce());
+			menuItems.length = 0;
+			row('B')!.dispatch('contextmenu');
+			releaseWrite!();
+			await vi.waitFor(() => expect(menuItems.length).toBeGreaterThan(0));
+			menuItems.find((item) => item.title === 'Delete item')!.callback!();
+			await vi.waitFor(() =>
+				expect(parseDailyNote(files[path]!).tasks.map((task) => task.text)).toEqual(['C']),
+			);
+			await view.onClose();
+		},
+	);
+
+	it.each(['project', 'daily'] as const)(
+		'offers Delete tree for a %s task after saving its first drafted child at menu opening',
+		async (surface) => {
+			const { view, root, files, path, row } = await taskMutationView(surface);
+			findByAriaLabel(root, 'Edit A')!.dispatch('click');
+			findByAriaLabel(root, 'Task text for A')!.dispatch('keydown', {
+				key: 'Enter',
+				shiftKey: true,
+			});
+			fakeDocument.activeElement!.value = 'First child';
+			row('A')!.dispatch('contextmenu');
+			await vi.waitFor(() => expect(menuItems.length).toBeGreaterThan(0));
+			expect(files[path]).toContain('- [ ] A\n  - [ ] First child');
+			expect(menuItems.map((item) => item.title)).toContain('Delete tree');
+			menuItems.find((item) => item.title === 'Delete tree')!.callback!();
+			await vi.waitFor(() =>
+				expect(parseDailyNote(files[path]!).tasks.map((task) => task.text)).toEqual(['B', 'C']),
+			);
+			await view.onClose();
+		},
+	);
+
+	it.each(['project', 'daily'] as const)(
+		'keeps a %s editor attached to its task when the preceding editor inserts a row',
+		async (surface) => {
+			const { view, root, files, path } = await taskMutationView(surface);
+			findByAriaLabel(root, 'Edit A')!.dispatch('click');
+			const first = findByAriaLabel(root, 'Task text for A')!;
+			first.dispatch('keydown', { key: 'Enter', ctrlKey: true });
+			fakeDocument.activeElement!.value = 'Inserted';
+			findByAriaLabel(root, 'Edit B')!.dispatch('click');
+			const second = findByAriaLabel(root, 'Task text for B')!;
+			await vi.waitFor(() => expect(files[path]).toContain('- [ ] Inserted'));
+			expect(findByAriaLabel(root, 'Task text for B')).toBe(second);
+			second.value = 'Renamed B';
+			second.dispatch('blur');
+			await vi.waitFor(() =>
+				expect(parseDailyNote(files[path]!).tasks.map((task) => task.text)).toEqual([
+					'A',
+					'Inserted',
+					'Renamed B',
+					'C',
+				]),
+			);
+			await view.onClose();
+		},
+	);
+
+	it.each([
+		{ action: 'checkbox', prior: 'delete', remaining: ['C', 'B'] },
+		{ action: 'reorder', prior: 'delete', remaining: ['C', 'B'] },
+		{ action: 'checkbox', prior: 'reorder', remaining: ['A', 'C', 'B'] },
+	])(
+		'waits for a prior project $prior before resolving a queued $action task',
+		async ({ action, prior, remaining }) => {
+			const { view, root, files, path, vault, row } = await taskMutationView('project');
+			let releaseWrite: (() => void) | undefined = undefined;
+			// eslint-disable-next-line promise/avoid-new -- hold note I/O while a second user action is dispatched.
+			const firstWrite = new Promise<void>((resolve) => {
+				releaseWrite = resolve;
+			});
+			vault.modify.mockImplementationOnce(async (file, markdown) => {
+				await firstWrite;
+				files[file.path] = markdown;
+			});
+			if (prior === 'delete') {
+				row('A')!.dispatch('contextmenu');
+				await vi.waitFor(() => expect(menuItems.length).toBeGreaterThan(0));
+				menuItems.find((item) => item.title === 'Delete item')!.callback!();
+			} else {
+				findByAriaLabel(row('A')!, 'Move task down')!.dispatch('click');
+			}
+			await vi.waitFor(() => expect(vault.modify).toHaveBeenCalledOnce());
+			if (action === 'checkbox') {
+				const checkbox = findByAriaLabel(root, 'Complete B')!;
+				checkbox.checked = true;
+				checkbox.dispatch('change');
+			} else {
+				findByAriaLabel(row('B')!, 'Move task down')!.dispatch('click');
+			}
+			releaseWrite!();
+			const expectedChecked = action === 'checkbox';
+			await vi.waitFor(() =>
+				expect(parseDailyNote(files[path]!).tasks.map((task) => [task.text, task.checked])).toEqual(
+					remaining.map((text) => [text, text === 'B' && expectedChecked]),
+				),
+			);
+			await view.onClose();
+		},
+	);
+
+	it('saves a daily draft before checking a later task and checks its remapped row', async () => {
+		const { view, root, files, path } = await taskMutationView('daily');
+		findByAriaLabel(root, 'Edit A')!.dispatch('click');
+		findByAriaLabel(root, 'Task text for A')!.dispatch('keydown', { key: 'Enter', ctrlKey: true });
+		fakeDocument.activeElement!.value = 'Inserted';
+		const checkbox = findByAriaLabel(root, 'Mark B complete')!;
+		checkbox.checked = true;
+		checkbox.dispatch('change');
+		await vi.waitFor(() =>
+			expect(parseDailyNote(files[path]!).tasks.map((task) => [task.text, task.checked])).toEqual([
+				['A', false],
+				['Inserted', false],
+				['B', true],
+				['C', false],
+			]),
+		);
+		await view.onClose();
+	});
+
+	it.each(['before the drop', 'while the drop settles'])(
+		'keeps daily drag source and destination identities when an edit inserts a row %s',
+		async (saveTiming) => {
+			const { view, root, files, path, row } = await taskMutationView('daily');
+			const data = new Map<string, string>();
+			const transfer = {
+				setData: (mime: string, value: string) => data.set(mime, value),
+				getData: (mime: string) => data.get(mime) ?? '',
+			};
+			dragHandleFor(row('B')!).dispatch('dragstart', { dataTransfer: transfer });
+			findByAriaLabel(root, 'Edit A')!.dispatch('click');
+			findByAriaLabel(root, 'Task text for A')!.dispatch('keydown', {
+				key: 'Enter',
+				ctrlKey: true,
+			});
+			const draft = fakeDocument.activeElement!;
+			draft.value = 'Inserted';
+			if (saveTiming === 'before the drop') {
+				draft.dispatch('blur');
+				await vi.waitFor(() => expect(files[path]).toContain('- [ ] Inserted'));
+			}
+			row('C')!.dispatch('drop', { dataTransfer: transfer, clientY: 29, clientX: 0 });
+			await vi.waitFor(() =>
+				expect(parseDailyNote(files[path]!).tasks.map((task) => task.text)).toEqual([
+					'A',
+					'Inserted',
+					'C',
+					'B',
+				]),
+			);
+			await view.onClose();
+		},
+	);
+
+	it('remaps a pending daily drag after a linked project draft inserts rows into the daily note', async () => {
+		const projectPath = '04_Projects/Pi.md';
+		const dailyPath = 'logs/2026/10/2026-10-24.md';
+		const files: Record<string, string> = {
+			[projectPath]: '---\ntavern: project\n---\n# Pi\n## Backlog\n- [ ] Parent ^source\n',
+			[dailyPath]:
+				'# Log\n### Plan\n- [ ] Parent ^copy\n- [ ] Drag source\n- [ ] Drag target\n- [ ] Neighbor\n',
+		};
+		const vault = {
+			...createVault(files),
+			getAbstractFileByPath: (path: string) => {
+				if (files[path] === undefined) {
+					return null;
+				}
+				return { path };
+			},
+			create: vi.fn(),
+			createFolder: vi.fn(),
+			process: async (file: ProjectVaultFile, transform: (markdown: string) => string) => {
+				await vault.modify(file, transform(files[file.path]!));
+				return files[file.path]!;
+			},
+		};
+		let links = [
+			{
+				source: { path: projectPath, blockId: 'source' },
+				copies: [{ path: dailyPath, blockId: 'copy' }],
+				checked: false,
+			},
+		];
+		const service = new DailyLogService(
+			new DailyLogStore(
+				vault,
+				() => 'logs',
+				() => new Date('2026-10-24T12:00:00'),
+			),
+			{
+				links: () => links,
+				saveLinks: async (next) => {
+					links = next;
+				},
+				remapTaskKeys: vi.fn(async () => async () => {}),
+			},
+		);
+		const view = new TavernView({} as never, {
+			dailyLogs: service,
+			vault,
+			saveSettings: vi.fn(),
+			settings: { boardTaskKeys: [], projectFolders: ['04_Projects'], tavernName: 'Tavern' },
+		});
+		await view.setState({ mode: 'note', selectedPath: projectPath }, { history: false });
+		const root = rootElements.at(-1)!;
+		await vi.waitFor(() =>
+			expect(findByAriaLabel(root, 'Mark Drag target complete')).toBeDefined(),
+		);
+		findByAriaLabel(root, 'Edit Parent')!.dispatch('click');
+		findByAriaLabel(root, 'Task text for Parent')!.dispatch('keydown', {
+			key: 'Enter',
+			shiftKey: true,
+		});
+		fakeDocument.activeElement!.value = 'New linked child';
+		let releaseWrite: (() => void) | undefined = undefined;
+		// eslint-disable-next-line promise/avoid-new -- hold the project write while the daily drag waits for its reference receipt.
+		const firstWrite = new Promise<void>((resolve) => {
+			releaseWrite = resolve;
+		});
+		vault.modify.mockImplementationOnce(async (file, markdown) => {
+			await firstWrite;
+			files[file.path] = markdown;
+		});
+		const data = new Map<string, string>();
+		const transfer = {
+			setData: (mime: string, value: string) => data.set(mime, value),
+			getData: (mime: string) => data.get(mime) ?? '',
+		};
+		dragHandleFor(findByAriaLabel(root, 'Mark Drag source complete')!.parent!).dispatch(
+			'dragstart',
+			{ dataTransfer: transfer },
+		);
+		findByAriaLabel(root, 'Mark Drag target complete')!.parent!.dispatch('drop', {
+			dataTransfer: transfer,
+			clientY: 29,
+			clientX: 0,
+		});
+		await vi.waitFor(() => expect(vault.modify).toHaveBeenCalledOnce());
+		releaseWrite!();
+		await vi.waitFor(() =>
+			expect(parseDailyNote(files[dailyPath]!).tasks.map((task) => task.text)).toEqual([
+				'Parent',
+				'New linked child',
+				'Drag target',
+				'Drag source',
+				'Neighbor',
+			]),
+		);
+		expect(files[projectPath]).toContain('New linked child');
+		await view.onClose();
+	});
+
+	it.each(['checkbox', 'drop'])(
+		'blocks a daily %s action when the active project edit cannot save',
+		async (action) => {
+			const controller = {
+				...createDailyController(),
+				editProjectTaskPlan: vi.fn(async () => {
+					throw new Error('Write failed');
+				}),
+			};
+			const view = dailyView(controller);
+			await view.setState({ mode: 'note', selectedPath: '04_Projects/Pi.md' }, { history: false });
+			const root = rootElements.at(-1)!;
+			await vi.waitFor(() =>
+				expect(findByAriaLabel(root, 'Mark Follow up complete')).toBeDefined(),
+			);
+			findByAriaLabel(root, 'Edit Build board')!.dispatch('click');
+			const input = findByAriaLabel(root, 'Task text for Build board')!;
+			input.value = 'Unsaved project edit';
+			if (action === 'checkbox') {
+				const checkbox = findByAriaLabel(root, 'Mark Review log complete')!;
+				checkbox.checked = true;
+				checkbox.dispatch('change');
+			} else {
+				const data = new Map<string, string>();
+				const transfer = {
+					setData: (mime: string, value: string) => data.set(mime, value),
+					getData: (mime: string) => data.get(mime) ?? '',
+				};
+				dragHandleFor(findByAriaLabel(root, 'Mark Follow up complete')!.parent!).dispatch(
+					'dragstart',
+					{ dataTransfer: transfer },
+				);
+				findByAriaLabel(root, 'Mark Review log complete')!.parent!.dispatch('drop', {
+					dataTransfer: transfer,
+					clientY: 1,
+					clientX: 0,
+				});
+			}
+			await vi.waitFor(() => expect(controller.editProjectTaskPlan).toHaveBeenCalledOnce());
+			await vi.waitFor(() => expect(findByClass(root, 'tavern-daily-error')).toBeDefined());
+			expect(controller.setTaskChecked).not.toHaveBeenCalled();
+			expect(controller.moveTask).not.toHaveBeenCalled();
+			expect(input.value).toBe('Unsaved project edit');
+			input.dispatch('keydown', { key: 'Escape' });
+			await view.onClose();
+		},
+	);
 
 	it('should add a dragged task to the focus queue', async () => {
 		const saveSettings = vi.fn();
@@ -2661,6 +3130,73 @@ tavern: project
 		expect(saveSettings).not.toHaveBeenCalled();
 		expect(settings.boardTaskKeys).toEqual(['04_Projects/Pi.md::backlog-1-build-board']);
 	});
+
+	it.each(['complete', 'section', 'before', 'after', 'child', 'up', 'down'] as const)(
+		'routes the project %s gesture through the shared task service even for an unlinked task',
+		async (operation) => {
+			const controller = {
+				...createDailyController(),
+				isLinked: () => false,
+				setProjectTaskChecked: vi.fn(async () => {}),
+				moveProjectTask: vi.fn(async () => {}),
+				moveProjectTaskToPosition: vi.fn(async () => {}),
+				reorderProjectTask: vi.fn(async () => {}),
+			};
+			const path = '04_Projects/Pi.md';
+			const vault = createVault({ [path]: `${NESTED_MARKDOWN}\n## Later\n` });
+			const view = new TavernView({} as never, {
+				dailyLogs: controller,
+				vault,
+				saveSettings: vi.fn(),
+				settings: { boardTaskKeys: [], projectFolders: ['04_Projects'], tavernName: 'Tavern' },
+			});
+			await view.setState({ mode: 'note', selectedPath: path }, { history: false });
+			const root = rootElements.at(-1)!;
+			const source = findByAriaLabel(root, 'Complete Next task')!.parent!;
+			const sourceTask = expect.objectContaining({ projectPath: path, text: 'Next task' });
+			if (operation === 'complete') {
+				const checkbox = findByAriaLabel(source, 'Complete Next task')!;
+				checkbox.checked = true;
+				checkbox.dispatch('change');
+				await vi.waitFor(() =>
+					expect(controller.setProjectTaskChecked).toHaveBeenCalledWith(sourceTask, true),
+				);
+			} else if (operation === 'up' || operation === 'down') {
+				findByAriaLabel(source, `Move task ${operation}`)!.dispatch('click');
+				await vi.waitFor(() =>
+					expect(controller.reorderProjectTask).toHaveBeenCalledWith(sourceTask, operation),
+				);
+			} else {
+				const transfer = new Map<string, string>();
+				dragHandleFor(source).dispatch('dragstart', {
+					dataTransfer: { setData: (mime: string, value: string) => transfer.set(mime, value) },
+				});
+				const dataTransfer = { getData: (mime: string) => transfer.get(mime) ?? '' };
+				if (operation === 'section') {
+					findSectionByTitle(root, 'Later')!.dispatch('drop', { dataTransfer });
+					await vi.waitFor(() =>
+						expect(controller.moveProjectTask).toHaveBeenCalledWith(sourceTask, 'Later'),
+					);
+				} else {
+					const positions = { before: 1, after: 29, child: 15 };
+					findByAriaLabel(root, 'Complete Parent task')!.parent!.dispatch('drop', {
+						dataTransfer,
+						clientY: positions[operation],
+						clientX: 100,
+					});
+					await vi.waitFor(() =>
+						expect(controller.moveProjectTaskToPosition).toHaveBeenCalledWith(
+							sourceTask,
+							expect.objectContaining({ text: 'Parent task', projectPath: path }),
+							operation,
+						),
+					);
+				}
+			}
+			expect(vault.modify).not.toHaveBeenCalled();
+			await view.onClose();
+		},
+	);
 
 	it('should move tasks between sections with drag and drop', async () => {
 		const files = {
@@ -3132,8 +3668,95 @@ tavern: project
 		expect(settings.boardTaskKeys).toEqual([validSourceKey]);
 	});
 	describe('Captain’s Log in the app shell', () => {
+		it.each([
+			{
+				action: 'Delete item',
+				remaining: ['Fresh child', 'Child task', 'Grandchild task', 'Next task'],
+			},
+			{ action: 'Delete tree', remaining: ['Next task'] },
+		])(
+			'persists $action from the daily menu after saving an active draft without resurrecting it',
+			async ({ action, remaining }) => {
+				const path = 'logs/2026/10/2026-10-24.md';
+				const files: Record<string, string> = {
+					[path]:
+						'# Daily log\n### Plan\n- [ ] Parent task\n  - [ ] Child task\n    - [ ] Grandchild task\n- [ ] Next task\n### Notes\nKeep the narrative.\n',
+				};
+				const vault = {
+					...createVault(files),
+					getAbstractFileByPath: (requested: string) => {
+						if (files[requested] === undefined) {
+							return null;
+						}
+						return { path: requested };
+					},
+					create: vi.fn(),
+					createFolder: vi.fn(),
+					process: async (file: ProjectVaultFile, transform: (markdown: string) => string) => {
+						files[file.path] = transform(files[file.path]!);
+						return files[file.path]!;
+					},
+				};
+				const service = new DailyLogService(
+					new DailyLogStore(
+						vault,
+						() => 'logs',
+						() => new Date('2026-10-24T12:00:00'),
+					),
+					{ links: () => [], saveLinks: vi.fn(), remapTaskKeys: vi.fn() },
+				);
+				const view = new TavernView({} as never, {
+					dailyLogs: service,
+					vault,
+					saveSettings: vi.fn(),
+					settings: { boardTaskKeys: [], projectFolders: ['04_Projects'], tavernName: 'Tavern' },
+				});
+				await view.onOpen();
+				const root = rootElements.at(-1)!;
+				await vi.waitFor(() =>
+					expect(findByAriaLabel(root, 'Mark Next task complete')).toBeDefined(),
+				);
+				findByAriaLabel(root, 'Mark Next task complete')!.parent!.dispatch('contextmenu');
+				await vi.waitFor(() => expect(menuItems.length).toBeGreaterThan(0));
+				expect(menuItems.map((item) => item.title)).toEqual(['Delete item']);
+				menuItems.length = 0;
+				const filter = findByAriaLabel(root, 'Search log')!;
+				filter.value = 'Parent';
+				filter.dispatch('input');
+				expect(findByAriaLabel(root, 'Mark Child task complete')).toBeUndefined();
+				const row = findByAriaLabel(root, 'Mark Parent task complete')!.parent!;
+				findByAriaLabel(root, 'Edit Parent task')!.dispatch('click');
+				const input = findByAriaLabel(root, 'Task text for Parent task')!;
+				input.value = 'Renamed parent';
+				input.dispatch('keydown', { key: 'Enter', shiftKey: true });
+				const draft = fakeDocument.activeElement!;
+				draft.value = 'Fresh child';
+				row.dispatch('contextmenu');
+				await vi.waitFor(() => expect(menuItems.length).toBeGreaterThan(0));
+				expect(menuItems.map((item) => item.title)).toEqual(['Delete item', 'Delete tree']);
+				menuItems.find((item) => item.title === action)!.callback!();
+				await vi.waitFor(() =>
+					expect(parseDailyNote(files[path]!).tasks.map((task) => task.text)).toEqual(remaining),
+				);
+				if (action === 'Delete item') {
+					expect(files[path]).toContain(
+						'- [ ] Fresh child\n- [ ] Child task\n  - [ ] Grandchild task\n- [ ] Next task',
+					);
+				} else {
+					expect(files[path]).not.toContain('Fresh child');
+					expect(files[path]).not.toContain('Child task');
+					expect(files[path]).not.toContain('Grandchild task');
+				}
+				draft.dispatch('blur');
+				await view.refreshProjects();
+				expect(files[path]).not.toContain('parent');
+				expect(files[path]).toContain('### Notes\nKeep the narrative.');
+				await view.onClose();
+			},
+		);
+
 		it.each(['plain task', 'task with ^unregistered-id'])(
-			'checks and unchecks a standalone %s without replacing the log or losing a draft',
+			'checks and unchecks a standalone %s without replacing the log content',
 			async (taskText) => {
 				const path = 'logs/2026/10/2026-10-24.md';
 				const files: Record<string, string> = {
@@ -3174,9 +3797,6 @@ tavern: project
 				const log = findByClass(root, 'tavern-daily-panel')!;
 				const row = findByClass(log, 'tavern-daily-task')!;
 				const checkbox = row.children.find((element) => element.type === 'checkbox')!;
-				const draft = findByAriaLabel(log, 'Add todo')!;
-				draft.value = 'Keep typing this thought';
-				draft.focus();
 				for (const checked of [true, false]) {
 					checkbox.checked = checked;
 					checkbox.dispatch('change');
@@ -3187,9 +3807,6 @@ tavern: project
 					await vi.waitFor(() => expect(row.classes.has('is-done')).toBe(checked));
 					expect(findByClass(root, 'tavern-daily-panel')).toBe(log);
 					expect(findByClass(log, 'tavern-daily-task')).toBe(row);
-					expect(findByAriaLabel(log, 'Add todo')).toBe(draft);
-					expect(draft.value).toBe('Keep typing this thought');
-					expect(fakeDocument.activeElement).toBe(draft);
 				}
 				expect(files[path]).toContain('- [ ]');
 				await view.onClose();

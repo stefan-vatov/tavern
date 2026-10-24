@@ -26,8 +26,8 @@ without sections is valid, and parsing it does not invent sections.
 
 Completing a task checks it and moves it to `Done`, creating that section if
 needed. Moving or reordering a parent carries its nested task tree and preserves
-relative nesting; deleting a parent removes its nested children. Completing a
-parent moves the tree but does not automatically check every child.
+relative nesting. Item and whole-tree deletion follow the
+[shared task-editing contract](task-editing.md). Completing a parent moves the tree but does not automatically check every child.
 
 Task operations preserve surrounding frontmatter and preamble. Blank task
 creation is rejected, as are operations on missing tasks. Editor cleanup of
