@@ -1,9 +1,8 @@
 # [1.3.0](https://github.com/stefan-vatov/tavern/compare/1.2.0...1.3.0) (2026-10-24)
 
-
 ### Features
 
-* refresh tavern ui and isolate background testing ([468d004](https://github.com/stefan-vatov/tavern/commit/468d004d108746d005049eb0754b0bf22a74e249))
+- refresh tavern ui and isolate background testing ([468d004](https://github.com/stefan-vatov/tavern/commit/468d004d108746d005049eb0754b0bf22a74e249))
 
 # [1.2.0](https://github.com/stefan-vatov/tavern/compare/1.1.0...1.2.0) (2026-09-23)
 
