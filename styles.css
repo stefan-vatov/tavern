@@ -51,15 +51,16 @@
 	box-shadow: none;
 	cursor: pointer;
 	transition:
-		background-color 120ms ease,
-		border-color 120ms ease,
-		color 120ms ease,
-		opacity 120ms ease;
+		background-color var(--tavern-motion-fast) ease,
+		border-color var(--tavern-motion-fast) ease,
+		color var(--tavern-motion-fast) ease,
+		opacity var(--tavern-motion-fast) ease;
 }
 .tavern-container button:focus-visible,
 .tavern-editable-task-text:focus-visible {
 	outline: 1px solid #7698c9;
 	outline-offset: 2px;
+	transition: none;
 }
 .tavern-container svg {
 	display: block;
@@ -188,10 +189,8 @@
 	border: 0;
 	border-radius: 6px;
 	cursor: pointer;
-	transition: background-color 120ms ease;
-}
-.tavern-skill-card:hover {
-	background: #26292b;
+	position: relative;
+	isolation: isolate;
 }
 .tavern-skill-card.is-selected {
 	background: #292d31;
@@ -247,9 +246,6 @@
 	border: 1px solid #3b3e43;
 	border-radius: 7px;
 	background: #242627;
-}
-.tavern-global-card:hover {
-	background: #2a2c2e;
 }
 .tavern-global-card.is-selected {
 	background: #242627;
@@ -374,7 +370,6 @@
 	background: transparent;
 	opacity: 0;
 }
-.tavern-detail-toolbar:hover .tavern-toolbar-btn,
 .tavern-container .tavern-toolbar-btn:focus-visible {
 	opacity: 1;
 }
@@ -479,7 +474,6 @@
 	width: 13px;
 	height: 13px;
 }
-.tavern-project-section-header:hover .tavern-project-section-toggle,
 .tavern-container .tavern-project-section-toggle:focus-visible,
 .is-collapsed .tavern-project-section-toggle {
 	opacity: 1;
@@ -497,11 +491,7 @@
 	border-top: 1px solid #2d3135;
 	background: transparent;
 	cursor: default;
-	transition:
-		background-color 120ms ease,
-		border-color 120ms ease,
-		box-shadow 120ms ease,
-		opacity 120ms ease;
+	isolation: isolate;
 }
 .tavern-global-task,
 .tavern-search-task,
@@ -510,10 +500,6 @@
 }
 .tavern-project-task:last-child {
 	border-bottom: 1px solid #2d3135;
-}
-.tavern-project-task:hover,
-.tavern-focus-task:hover {
-	background: #25292c;
 }
 .tavern-project-task.is-in-global-queue {
 	background: #222a34;
@@ -639,8 +625,6 @@
 .tavern-container .tavern-task-drag-handle:active {
 	cursor: grabbing !important;
 }
-.tavern-project-task:hover .tavern-task-drag-handle,
-.tavern-focus-task:hover .tavern-task-drag-handle,
 .tavern-project-task:focus-within .tavern-task-drag-handle,
 .tavern-focus-task:focus-within .tavern-task-drag-handle {
 	opacity: 1;
@@ -684,7 +668,6 @@
 	gap: 2px;
 	opacity: 0;
 }
-.tavern-project-task:hover .tavern-project-task-reorder,
 .tavern-project-task:focus-within .tavern-project-task-reorder {
 	opacity: 1;
 }
@@ -947,6 +930,86 @@
 		padding: 16px;
 	}
 }
+.tavern-skill-card::after,
+.tavern-daily-add-task::after,
+.tavern-project-task::after,
+.tavern-focus-task::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: -1;
+	border-radius: inherit;
+	background: var(--tavern-bg-hover);
+	opacity: 0;
+	pointer-events: none;
+}
+.tavern-skill-card::after {
+	background: #26292b;
+}
+.tavern-global-card::after {
+	background: #2a2c2e;
+}
+.tavern-has-daily-log .tavern-skill-card::after {
+	background: #222527;
+}
+@media (hover: hover) and (pointer: fine) {
+	.tavern-skill-card::after,
+	.tavern-daily-add-task::after,
+	.tavern-project-task::after,
+	.tavern-focus-task::after,
+	.tavern-container .tavern-toolbar-btn,
+	.tavern-container .tavern-project-section-toggle,
+	.tavern-container .tavern-task-drag-handle,
+	.tavern-project-task-reorder {
+		transition: opacity var(--tavern-motion-fast) var(--tavern-ease-out);
+	}
+	.tavern-skill-card:hover:not(.is-selected, :focus-visible)::after,
+	.tavern-daily-add-task:hover:not(:focus-within)::after,
+	.tavern-project-task:hover:not(
+			.is-in-global-queue,
+			.is-drop-before,
+			.is-drop-after,
+			.is-drop-child,
+			.is-dragging-task
+		)::after,
+	.tavern-focus-task:hover:not(
+			.is-drop-before,
+			.is-drop-after,
+			.is-drop-child,
+			.is-dragging-task
+		)::after,
+	.tavern-detail-toolbar:hover .tavern-toolbar-btn,
+	.tavern-project-section-header:hover .tavern-project-section-toggle,
+	.tavern-project-task:hover .tavern-task-drag-handle,
+	.tavern-focus-task:hover .tavern-task-drag-handle,
+	.tavern-project-task:hover .tavern-project-task-reorder {
+		opacity: 1;
+	}
+	:root:has(:focus-visible)
+		.tavern-container
+		:is(
+			.tavern-toolbar-btn,
+			.tavern-project-section-toggle,
+			.tavern-task-drag-handle,
+			.tavern-project-task-reorder
+		),
+	.tavern-skill-card:is(.is-selected, :focus-visible)::after,
+	.tavern-daily-add-task:focus-within::after,
+	:is(.tavern-project-task, .tavern-focus-task):is(
+			.is-in-global-queue,
+			.is-drop-before,
+			.is-drop-after,
+			.is-drop-child,
+			.is-dragging-task
+		)::after,
+	.tavern-container .tavern-toolbar-btn:focus-visible,
+	.tavern-container .tavern-project-section-toggle:focus-visible,
+	.tavern-project-task:focus-within .tavern-task-drag-handle,
+	.tavern-focus-task:focus-within .tavern-task-drag-handle,
+	.tavern-project-task:focus-within .tavern-project-task-reorder {
+		transition: none;
+	}
+}
 @media (hover: none), (pointer: coarse) {
 	.tavern-task-drag-handle {
 		opacity: 0.72;
@@ -1034,9 +1097,6 @@
 	margin: 0;
 	padding: 7px 9px 6px;
 	border-radius: 4px;
-}
-.tavern-has-daily-log .tavern-skill-card:hover {
-	background: #222527;
 }
 .tavern-has-daily-log .tavern-skill-name {
 	color: #d7d7d7;
@@ -1177,10 +1237,6 @@
 	grid-template-columns: 17px minmax(0, 1fr) auto;
 	min-height: 57px;
 	padding: 7px 10px 7px calc(10px + min(var(--tavern-task-depth) * 24px, 192px));
-}
-.tavern-has-daily-log .tavern-project-task:hover,
-.tavern-has-daily-log .tavern-focus-task:hover {
-	background: #242526;
 }
 .tavern-has-daily-log .tavern-project-task.is-in-global-queue {
 	background: #222a34;
@@ -1360,6 +1416,8 @@
 	border-bottom: 1px solid #385678;
 }
 .tavern-daily-add-task {
+	position: relative;
+	isolation: isolate;
 	display: flex;
 	align-items: center;
 	gap: 10px;
@@ -1376,7 +1434,6 @@
 	text-align: center;
 	font-size: 15px;
 }
-.tavern-daily-add-task:hover,
 .tavern-daily-add-task:focus-within {
 	background: #242526;
 }

@@ -71,6 +71,12 @@ Delete tree removes the whole linked group.
 A failed save keeps the draft editable. If Tavern closes before a save fails,
 a recovery dialog keeps the unsaved task text available to copy as Markdown.
 
+Row highlights, sidebar cards, and the daily add-task prompt use quiet hover
+fades. Controls reveal gently on hover and immediately for keyboard focus.
+Typing, filtering, task updates, and drag placement remain immediate; ordinary
+refreshes do not replay item entrances. Reduced motion keeps these subtle fades
+without adding movement.
+
 ## Daily Log
 
 The split view keeps the selected queue or project beside **Captain's Log**.
