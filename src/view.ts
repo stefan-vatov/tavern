@@ -87,6 +87,7 @@ class TavernView extends ItemView {
 	private dailyPane: DailyLogPane | undefined;
 	private listEl: HTMLElement | undefined;
 	private detailEl: HTMLElement | undefined;
+	private detailFilterInput: HTMLInputElement | undefined;
 	private refreshRevision = 0;
 	private dailyDay: string;
 	private dailyQuery = '';
@@ -191,6 +192,7 @@ class TavernView extends ItemView {
 		}
 		this.listEl = undefined;
 		this.detailEl = undefined;
+		this.detailFilterInput = undefined;
 		this.refreshRevision += 1;
 		this.popSearchOverlayScope();
 		this.dragCleanup?.();
@@ -760,6 +762,8 @@ class TavernView extends ItemView {
 		const focused = [...this.projectCaptures.values()].find(
 			({ input }) => input.ownerDocument.activeElement === input,
 		)?.input;
+		const focusedFilter = this.detailFilterInput;
+		const filterFocused = focusedFilter?.ownerDocument.activeElement === focusedFilter;
 		try {
 			containerEl.empty();
 			containerEl.addClass('tavern-detail');
@@ -792,6 +796,18 @@ class TavernView extends ItemView {
 			}
 			if (focused && containerEl.contains(focused)) {
 				focused.focus({ preventScroll: true });
+			} else if (
+				filterFocused &&
+				focusedFilter &&
+				this.detailFilterInput &&
+				containerEl.contains(this.detailFilterInput)
+			) {
+				this.detailFilterInput.focus({ preventScroll: true });
+				this.detailFilterInput.setSelectionRange(
+					focusedFilter.selectionStart,
+					focusedFilter.selectionEnd,
+					focusedFilter.selectionDirection ?? undefined,
+				);
 			}
 		}
 	}
@@ -838,6 +854,7 @@ class TavernView extends ItemView {
 			type: 'text',
 			value: this.globalTaskQuery,
 		});
+		this.detailFilterInput = input;
 		this.registerDomEvent(input, 'input', () => {
 			this.globalTaskQuery = input.value;
 			onInput();
@@ -1075,6 +1092,7 @@ class TavernView extends ItemView {
 			type: 'text',
 			value: this.projectQuery,
 		});
+		this.detailFilterInput = input;
 		this.registerDomEvent(input, 'input', () => {
 			this.projectQuery = input.value;
 			onInput();

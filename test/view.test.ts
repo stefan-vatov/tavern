@@ -94,6 +94,8 @@ class FakeElement {
 	style = new FakeStyle();
 	text = '';
 	value = '';
+	selectionStart = 0;
+	selectionEnd = 0;
 
 	constructor(
 		readonly tag: string,
@@ -241,6 +243,11 @@ class FakeElement {
 	}
 
 	select(): void {}
+
+	setSelectionRange(start: number, end: number): void {
+		this.selectionStart = start;
+		this.selectionEnd = end;
+	}
 
 	getAttributeNames(): string[] {
 		return Object.keys(this.attr);
@@ -4502,6 +4509,49 @@ tavern: project
 			expect(controller.moveTask).not.toHaveBeenCalled();
 			expect(controller.copyProjectTask).not.toHaveBeenCalled();
 		});
+
+		it.each(['project', 'global'] as const)(
+			'preserves %s filter focus, text and selection when a pending daily capture finishes',
+			async (boardPage) => {
+				const controller = createDailyController();
+				let finishCapture: () => void = () => {
+					throw new Error('Capture did not start.');
+				};
+				// eslint-disable-next-line promise/avoid-new
+				const pending = new Promise<void>((resolve) => {
+					finishCapture = resolve;
+				});
+				controller.addTaskPlan.mockImplementation(() => pending);
+				const view = dailyView(controller);
+				await view.setState({ boardPage, selectedPath: '04_Projects/Pi.md' }, { history: false });
+				const root = rootElements.at(-1)!;
+				await vi.waitFor(() => expect(findByAriaLabel(root, 'Add todo')).toBeDefined());
+				const capture = findByAriaLabel(root, 'Add todo')!;
+				capture.focus();
+				capture.value = 'Save while I filter tasks';
+				capture.dispatch('input');
+				capture.dispatch('keydown', { key: 'Enter' });
+				await vi.waitFor(() => expect(controller.addTaskPlan).toHaveBeenCalledOnce());
+				expect(capture.readOnly).toBe(true);
+				const filterLabel = `Filter ${boardPage} tasks`;
+				const filter = findByAriaLabel(root, filterLabel)!;
+				filter.focus();
+				filter.value = 'board';
+				filter.dispatch('input');
+				filter.setSelectionRange(1, 4);
+				const readsBeforeSave = controller.read.mock.calls.length;
+				finishCapture();
+				await vi.waitFor(() =>
+					expect(controller.read.mock.calls.length).toBeGreaterThan(readsBeforeSave),
+				);
+				const refreshedFilter = findByAriaLabel(root, filterLabel)!;
+				expect(fakeDocument.activeElement).toBe(refreshedFilter);
+				expect(refreshedFilter.value).toBe('board');
+				expect(refreshedFilter.selectionStart).toBe(1);
+				expect(refreshedFilter.selectionEnd).toBe(4);
+				expect(capture.value).toBe('');
+			},
+		);
 
 		it('ignores blank capture, ordinary typing and an Enter used to compose text', async () => {
 			const controller = createDailyController();
