@@ -106,15 +106,18 @@ describe('daily log Markdown', () => {
 		expect(() => addDailyTask(original, 'one\ntwo')).toThrow('single line');
 	});
 
-	it('appends within Plan without moving the Notes narrative and supplies missing headings', () => {
-		const original = '# Day\n## General\n### Plan\n- [ ] Existing\n\n### Notes\nKeep this.\n';
-		expect(addDailyTask(original, 'Next')).toBe(
-			'# Day\n## General\n### Plan\n- [ ] Existing\n- [ ] Next\n\n### Notes\nKeep this.\n',
-		);
-		const missing = addDailyTask('# Day\nUnstructured prose.\n', 'Captured');
-		expect(missing).toContain('# Day\nUnstructured prose.\n');
-		expect(missing).toContain('## General\n\n### Plan\n\n- [ ] Captured');
-	});
+	it.each(['###', '####'])(
+		'appends visibly within Plan before %s Notes without moving narrative and supplies missing headings',
+		(heading) => {
+			const original = `# Day\n## General\n### Plan\n- [ ] Existing\n\n${heading} Notes\nKeep this.\n`;
+			expect(addDailyTask(original, 'Next')).toBe(
+				`# Day\n## General\n### Plan\n- [ ] Existing\n- [ ] Next\n\n${heading} Notes\nKeep this.\n`,
+			);
+			const missing = addDailyTask('# Day\nUnstructured prose.\n', 'Captured');
+			expect(missing).toContain('# Day\nUnstructured prose.\n');
+			expect(missing).toContain('## General\n\n### Plan\n\n- [ ] Captured');
+		},
+	);
 
 	it('moves a complete parent subtree including its indented prose and retains unrelated narrative', () => {
 		const markdown =
@@ -291,12 +294,19 @@ describe('daily log Markdown', () => {
 		expect(parsed.items).toContainEqual({ type: 'text', raw: '### Not a section', lineIndex: 2 });
 	});
 
-	it('creates Plan inside the existing General section without swallowing narrative or the next section', () => {
-		const note = '# Day\n## General\nAn intro.\n### Notes\nKeep notes.\n## Other\nOther prose.\n';
-		expect(insertDailyTaskTree(note, '- [ ] Captured\n  - [x] Detail').markdown).toBe(
-			'# Day\n## General\nAn intro.\n### Notes\nKeep notes.\n### Plan\n\n- [ ] Captured\n  - [x] Detail\n\n## Other\nOther prose.\n',
-		);
-	});
+	it.each(['absent', 'hidden'])(
+		'creates visible Plan inside the existing General section without swallowing narrative when Plan is %s',
+		(kind) => {
+			let hiddenPlan = '';
+			if (kind === 'hidden') {
+				hiddenPlan = '#### Plan\n- [ ] Existing hidden\n';
+			}
+			const note = `# Day\n## General\nAn intro.\n### Notes\nKeep notes.\n${hiddenPlan}## Other\nOther prose.\n`;
+			expect(insertDailyTaskTree(note, '- [ ] Captured\n  - [x] Detail').markdown).toBe(
+				`# Day\n## General\nAn intro.\n### Notes\nKeep notes.\n${hiddenPlan}### Plan\n\n- [ ] Captured\n  - [x] Detail\n\n## Other\nOther prose.\n`,
+			);
+		},
+	);
 
 	it('reindents a moved tab-indented subtree with space-indented children while retaining CRLF and final prose', () => {
 		const note =

@@ -135,6 +135,47 @@ function requireTask(markdown: string, lineIndex: number): DailyTask {
 	return task;
 }
 
+function dailyNotesLevel(note: DailyNote, lineIndex: number): number | undefined {
+	let hidden: number | undefined = undefined;
+	for (const item of note.items) {
+		if (item.type !== 'heading') {
+			continue;
+		}
+		if (item.lineIndex > lineIndex) {
+			break;
+		}
+		if (hidden !== undefined && item.level <= hidden) {
+			hidden = undefined;
+		}
+		if (item.text.trim().toLowerCase() === 'notes') {
+			hidden ??= item.level;
+		}
+	}
+	return hidden;
+}
+
+function dailyPlanInsertion(markdown: string): number | undefined {
+	const note = parseDailyNote(markdown);
+	const headings = note.items.filter((item) => item.type === 'heading');
+	const plan = headings.find(
+		(item) => item.text === 'Plan' && dailyNotesLevel(note, item.lineIndex) === undefined,
+	);
+	if (!plan) {
+		return undefined;
+	}
+	const lines = readLines(markdown);
+	let index =
+		headings.find(
+			(item) =>
+				item.lineIndex > plan.lineIndex &&
+				(item.level <= plan.level || item.text.trim().toLowerCase() === 'notes'),
+		)?.lineIndex ?? lines.length;
+	while (index > plan.lineIndex + 1 && !lines[index - 1]!.raw.trim()) {
+		index -= 1;
+	}
+	return index;
+}
+
 function taskText(text: string): string {
 	if (!text.trim()) {
 		throw new Error('Task text was empty.');
@@ -187,10 +228,16 @@ function appendDailyTaskLines(markdown: string, raws: string[], sectionName: str
 
 function appendTaskLines(lines: MarkdownLine[], raws: string[], sectionName: string): void {
 	const name = taskText(sectionName);
-	const headings = parseDailyNote(writeLines(lines)).items.filter(
-		(item) => item.type === 'heading',
-	);
-	const section = headings.find((item) => item.text === name);
+	const markdown = writeLines(lines);
+	if (name === 'Plan') {
+		const index = dailyPlanInsertion(markdown);
+		if (index !== undefined) {
+			insertLines(lines, index, raws);
+			return;
+		}
+	}
+	const headings = parseDailyNote(markdown).items.filter((item) => item.type === 'heading');
+	const section = name === 'Plan' ? undefined : headings.find((item) => item.text === name);
 	if (section) {
 		const nextHeading = headings.find(
 			(item) => item.lineIndex > section.lineIndex && item.level <= section.level,
@@ -360,6 +407,8 @@ export {
 	addDailyTask,
 	createDailyNote,
 	dailyLogPath,
+	dailyNotesLevel,
+	dailyPlanInsertion,
 	editDailyTask,
 	insertDailyTaskTree,
 	localDay,

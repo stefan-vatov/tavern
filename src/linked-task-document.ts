@@ -1,6 +1,12 @@
 /* eslint-disable eslint/func-style, eslint/max-statements, eslint/no-continue, eslint/no-magic-numbers, eslint/no-ternary */
 import { Effect, Either } from 'effect';
-import { insertDailyTaskTree, parseDailyNote, type DailyTask } from './daily-note';
+import {
+	dailyNotesLevel,
+	dailyPlanInsertion,
+	insertDailyTaskTree,
+	parseDailyNote,
+	type DailyTask,
+} from './daily-note';
 import { indentWidth, parseProjectNote } from './project-note';
 import {
 	applyTaskDelete,
@@ -207,28 +213,22 @@ class LinkedTaskDocument {
 
 	sectionIndex(name: string): number {
 		const visiblePlan = name === 'Plan' && !this.isProject;
+		if (visiblePlan) {
+			const index = dailyPlanInsertion(this.markdown());
+			if (index !== undefined) {
+				return index;
+			}
+		}
 		const headings = parseDailyNote(this.markdown()).items.filter(
 			(item) => item.type === 'heading',
 		);
 		const heading = headings.find(
-			(item) =>
-				item.text === name &&
-				(!this.isProject || item.level === 2) &&
-				(!visiblePlan || !this.isHidden(this.lines[item.lineIndex]!)),
+			(item) => item.text === name && (!this.isProject || item.level === 2) && !visiblePlan,
 		);
 		if (heading) {
 			let index =
 				headings.find((item) => item.lineIndex > heading.lineIndex && item.level <= heading.level)
 					?.lineIndex ?? this.lines.length;
-			if (visiblePlan) {
-				index =
-					headings.find(
-						(item) =>
-							item.lineIndex > heading.lineIndex &&
-							item.lineIndex < index &&
-							item.text.trim().toLowerCase() === 'notes',
-					)?.lineIndex ?? index;
-			}
 			while (index > heading.lineIndex + 1 && !this.lines[index - 1]!.raw.trim()) {
 				index -= 1;
 			}
@@ -239,7 +239,10 @@ class LinkedTaskDocument {
 			: this.lines.length;
 		const defaultLevel = this.isProject ? 2 : 3;
 		const level = visiblePlan
-			? Math.min(defaultLevel, this.hiddenNotesLevel(index) ?? defaultLevel)
+			? Math.min(
+					defaultLevel,
+					dailyNotesLevel(parseDailyNote(this.markdown()), index) ?? defaultLevel,
+				)
 			: defaultLevel;
 		this.insert(index, [
 			{ raw: `${'#'.repeat(level)} ${name}`, ending: this.ending },
@@ -249,26 +252,7 @@ class LinkedTaskDocument {
 	}
 
 	isHidden(line: TaskLine): boolean {
-		return this.hiddenNotesLevel(this.lines.indexOf(line)) !== undefined;
-	}
-
-	private hiddenNotesLevel(index: number): number | undefined {
-		let hidden: number | undefined = undefined;
-		for (const item of parseDailyNote(this.markdown()).items) {
-			if (item.type !== 'heading') {
-				continue;
-			}
-			if (item.lineIndex > index) {
-				break;
-			}
-			if (hidden !== undefined && item.level <= hidden) {
-				hidden = undefined;
-			}
-			if (item.text.trim().toLowerCase() === 'notes') {
-				hidden ??= item.level;
-			}
-		}
-		return hidden;
+		return dailyNotesLevel(parseDailyNote(this.markdown()), this.lines.indexOf(line)) !== undefined;
 	}
 
 	move(line: TaskLine, target: TaskLine, placement: 'before' | 'after' | 'child'): void {
