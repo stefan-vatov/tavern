@@ -1,6 +1,7 @@
 import { configDefaults, defineConfig } from 'vitest/config';
 
 export default defineConfig({
+	define: { __TAVERN_SEARCH_WORKER_SOURCE__: JSON.stringify('') },
 	test: {
 		globals: true,
 		environment: 'node',

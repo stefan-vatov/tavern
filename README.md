@@ -45,6 +45,12 @@ sections, with `Done` receiving completed tasks automatically.
 By default the project board scans `04_Projects`. Change the scanned folders in
 Tavern settings with a comma-separated list.
 
+Global task search keeps the input in place while a dedicated worker searches
+prepared task data. Typing and Backspace update immediately; old results remain
+visible but inactive until the latest result arrives. Escape clears the session.
+A search failure offers **Retry search**. Matching and the fifty-row result limit
+remain unchanged.
+
 ## Fast task editing
 
 Click a task's text to edit it. The same shortcuts work in projects, queues,
@@ -284,3 +290,12 @@ Obsidian releases need these files attached individually:
 - `styles.css`
 
 Version bumps should keep `package.json`, `manifest.json`, and `versions.json` aligned.
+
+### Search performance checks
+
+Run `pnpm run benchmark:search` for cold preparation, uncached processing and
+cache-hit timings on 10,000 tasks, with ordered results checked against the
+reference matcher. This measures the engine, not worker startup or UI latency.
+Production UI measurements should separately record native query echo, worker
+round-trip time, DOM work and frame intervals at ordinary and 4K viewport sizes;
+use the isolated session procedure in [local testing](docs/local-testing.md).

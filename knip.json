@@ -14,10 +14,12 @@
 				"scripts/set-version.mjs!",
 				"scripts/verify-release.mjs!",
 				"src/main.ts!",
+				"src/task-search-worker.ts!",
 				"src/project-actions.ts!",
 				"src/project-library.ts!",
 				"src/project-note.ts!",
-				"src/project-vault.ts!"
+				"src/project-vault.ts!",
+				"scripts/benchmark-task-search.mjs"
 			],
 			"project": [
 				"**/*.{js,mjs,cjs,jsx,ts,tsx,mts,cts}!",

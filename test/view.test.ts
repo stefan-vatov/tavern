@@ -11,6 +11,8 @@ import { DailyLogStore } from '../src/daily-log-store';
 import type { DailyLogController, DailyLogSnapshot } from '../src/daily-log-controller';
 import { TAVERN_VIEW_TYPE } from '../src/project-mode';
 import type { ProjectVaultFile } from '../src/project-vault';
+import type { TaskSearchClient, SearchRequest, SearchResult } from '../src/task-search-service';
+import type { SearchTask } from '../src/task-search-index';
 
 const PROJECT_MARKDOWN = `---
 Title: Pi
@@ -85,6 +87,7 @@ class FakeElement {
 	children: FakeElement[] = [];
 	classes = new Set<string>();
 	disabled = false;
+	inert = false;
 	readOnly = false;
 	draggable = false;
 	focused = false;
@@ -403,6 +406,40 @@ class FakeMenuItemApi implements FakeMenuItem {
 	}
 }
 
+vi.mock('../src/task-search-service', async () => {
+	const { filterTasks } = await import('../src/project-library');
+	return {
+		createTaskSearchClient: () => {
+			let tasks: ProjectBoardTask[] = [];
+			return {
+				prepare: async (revision: number, source: ProjectBoardTask[]) => {
+					tasks = source;
+					return { revision, diagnostics: { prepareMs: 0, itemCount: source.length } };
+				},
+				search: async (request: {
+					session: number;
+					generation: number;
+					revision: number;
+					query: string;
+				}) => {
+					const matches = filterTasks(
+						tasks.filter((task) => !task.checked),
+						request.query,
+					);
+					return {
+						...request,
+						ids: matches.slice(0, 50).map((task) => task.id),
+						total: matches.length,
+						diagnostics: { queryMs: 0, cacheHit: false },
+					};
+				},
+				retry: async () => {},
+				dispose: async () => {},
+			};
+		},
+	};
+});
+
 vi.mock('obsidian', () => ({
 	Component: class {
 		private children: { unload(): void }[] = [];
@@ -526,6 +563,87 @@ const textValues = (root: FakeElement): string[] =>
 
 const findByAriaLabel = (root: FakeElement, label: string): FakeElement | undefined =>
 	allElements(root).find((element) => element.attr['aria-label'] === label);
+
+const waitForSearchResults = async (root: FakeElement): Promise<void> => {
+	await vi.waitFor(() =>
+		expect(findByClass(root, 'tavern-search-results')?.attr['aria-busy']).toBe('false'),
+	);
+};
+
+const controlledTaskSearch = () => {
+	const sources = new Map<number, readonly SearchTask[]>();
+	const pending: {
+		request: SearchRequest;
+		promise: Promise<SearchResult>;
+		resolve: (result: SearchResult) => void;
+		reject: (error: Error) => void;
+	}[] = [];
+	const client: TaskSearchClient = {
+		prepare: vi.fn(async (revision, tasks) => {
+			sources.set(revision, tasks);
+			return { revision, diagnostics: { prepareMs: 0, itemCount: tasks.length } };
+		}),
+		search: vi.fn((request) => {
+			// eslint-disable-next-line eslint/init-declarations -- assigned synchronously by the Promise constructor.
+			let resolveReply!: (result: SearchResult) => void;
+			// eslint-disable-next-line eslint/init-declarations -- assigned synchronously by the Promise constructor.
+			let rejectReply!: (error: Error) => void;
+			// eslint-disable-next-line promise/avoid-new -- model transport replies arriving in user-controlled order.
+			const promise = new Promise<SearchResult>((resolve, reject) => {
+				resolveReply = resolve;
+				rejectReply = reject;
+			});
+			pending.push({ request, promise, resolve: resolveReply, reject: rejectReply });
+			return promise;
+		}),
+		retry: vi.fn(async () => {}),
+		dispose: vi.fn(async () => {}),
+	};
+	const finish = async (index: number, texts: string[]): Promise<void> => {
+		const reply = pending[index]!;
+		const ids = sources
+			.get(reply.request.revision)!
+			.filter((task) => texts.includes(task.text))
+			.map((task) => task.id);
+		reply.resolve({
+			...reply.request,
+			ids,
+			total: ids.length,
+			diagnostics: { queryMs: 0, cacheHit: false },
+		});
+		await reply.promise;
+	};
+	const fail = async (index: number, message: string): Promise<void> => {
+		const reply = pending[index]!;
+		reply.reject(new Error(message));
+		await reply.promise.catch(() => {});
+	};
+	return { client, pending, finish, fail };
+};
+
+const controlledSearchView = async () => {
+	const search = controlledTaskSearch();
+	const files = {
+		'04_Projects/Blogging.md': OTHER_MARKDOWN,
+		'04_Projects/Pi.md': PROJECT_MARKDOWN,
+	};
+	const view = new TavernView({} as never, {
+		saveSettings: vi.fn(),
+		settings: { boardTaskKeys: [], projectFolders: ['04_Projects'], tavernName: 'Tavern' },
+		vault: createVault(files),
+		taskSearch: search.client,
+	});
+	await view.onOpen();
+	view.openTaskSearch();
+	const root = rootElements.at(-1)!;
+	const query = async (text: string, count: number): Promise<void> => {
+		const input = findByAriaLabel(root, 'Search Tavern tasks')!;
+		input.value = text;
+		input.dispatch('input');
+		await vi.waitFor(() => expect(search.pending).toHaveLength(count));
+	};
+	return { view, root, files, search, query };
+};
 
 const dragHandleFor = (row: FakeElement | undefined): FakeElement => {
 	if (!row) {
@@ -1080,6 +1198,119 @@ tavern: project
 		expect(textValues(rootElements.at(-1) as FakeElement)).not.toContain('⇱ [[01_Manage]] ▴');
 	});
 
+	it('preserves the native search input and selection while typing and deleting', async () => {
+		const view = new TavernView({} as never, {
+			saveSettings: vi.fn(),
+			settings: { boardTaskKeys: [], projectFolders: ['04_Projects'], tavernName: 'Tavern' },
+			vault: createVault({ '04_Projects/Blogging.md': OTHER_MARKDOWN }),
+		});
+		await view.onOpen();
+		view.openTaskSearch();
+		const root = rootElements.at(-1)!;
+		const input = findByAriaLabel(root, 'Search Tavern tasks')!;
+		input.value = 'Draft';
+		input.selectionStart = 2;
+		input.selectionEnd = 2;
+		input.dispatch('input');
+		expect(findByAriaLabel(root, 'Search Tavern tasks')).toBe(input);
+		expect(input.selectionStart).toBe(2);
+		input.value = 'Daft';
+		input.selectionStart = 1;
+		input.selectionEnd = 1;
+		input.dispatch('input');
+		expect(findByAriaLabel(root, 'Search Tavern tasks')).toBe(input);
+		expect(input.selectionStart).toBe(1);
+		await view.onClose();
+	});
+
+	it('ignores late replies for an older query after newer results are visible', async () => {
+		const { view, root, search, query } = await controlledSearchView();
+		await query('draft', 1);
+		await query('board', 2);
+		await search.finish(1, ['Build board']);
+		await waitForSearchResults(root);
+		await search.finish(0, ['Draft post']);
+
+		const results = findByClass(root, 'tavern-search-results')!;
+		expect(textValues(results)).toContain('Build board');
+		expect(textValues(results)).not.toContain('Draft post');
+		await view.onClose();
+	});
+
+	it('retains visible rows as inert while a replacement query is pending', async () => {
+		const { view, root, search, query } = await controlledSearchView();
+		await query('draft', 1);
+		await search.finish(0, ['Draft post']);
+		await waitForSearchResults(root);
+		const row = findByClass(root, 'tavern-search-task')!;
+		const results = findByClass(root, 'tavern-search-results')!;
+		await query('board', 2);
+
+		expect(findByClass(root, 'tavern-search-task')).toBe(row);
+		expect(results.inert).toBe(true);
+		expect(results.attr['aria-busy']).toBe('true');
+		await search.finish(1, ['Build board']);
+		await waitForSearchResults(root);
+		expect(results.inert).toBe(false);
+		expect(textValues(results)).toContain('Build board');
+		await view.onClose();
+	});
+
+	it('clears the search session on Escape and ignores its late failure after reopening', async () => {
+		const { view, root, search, query } = await controlledSearchView();
+		await query('draft', 1);
+		triggerScopeKey(pushedScopes.at(-1), 'Escape');
+		expect(findByClass(root, 'tavern-search-overlay')).toBeUndefined();
+		view.openTaskSearch();
+		expect(findByAriaLabel(root, 'Search Tavern tasks')?.value).toBe('');
+		await search.fail(0, 'old worker failure');
+		expect(textValues(findByClass(root, 'tavern-search-results')!)).toEqual([
+			'Start typing to search open tasks.',
+		]);
+		await query('board', 2);
+		expect(search.pending[1]!.request.session).not.toBe(search.pending[0]!.request.session);
+		await search.finish(1, ['Build board']);
+		await waitForSearchResults(root);
+		triggerScopeKey(pushedScopes.at(-1), 'Escape');
+		expect(findByClass(root, 'tavern-search-overlay')).toBeUndefined();
+		await view.onClose();
+	});
+
+	it('invalidates pending task identities when source notes refresh', async () => {
+		const { view, root, files, search, query } = await controlledSearchView();
+		await query('draft', 1);
+		files['04_Projects/Blogging.md'] = OTHER_MARKDOWN.replace('Draft post', 'Updated post');
+		await view.refreshProjects();
+		await vi.waitFor(() => expect(search.pending).toHaveLength(2));
+		expect(search.pending[1]!.request.revision).not.toBe(search.pending[0]!.request.revision);
+		await search.finish(1, ['Updated post']);
+		await waitForSearchResults(root);
+		await search.finish(0, ['Draft post']);
+
+		const results = findByClass(root, 'tavern-search-results')!;
+		expect(textValues(results)).toContain('Updated post');
+		expect(textValues(results)).not.toContain('Draft post');
+		await view.onClose();
+	});
+
+	it('shows worker failure with Retry and disposes the search client on close', async () => {
+		const { view, root, search, query } = await controlledSearchView();
+		await query('draft', 1);
+		await search.fail(0, 'worker unavailable');
+		await waitForSearchResults(root);
+		expect(textValues(findByClass(root, 'tavern-search-results')!)).toContain(
+			'Task search failed: worker unavailable',
+		);
+		findByText(root, 'Retry search')!.dispatch('click');
+		await vi.waitFor(() => expect(search.pending).toHaveLength(2));
+		expect(search.client.retry).toHaveBeenCalledTimes(1);
+		await search.finish(1, ['Draft post']);
+		await waitForSearchResults(root);
+		expect(findByAriaLabel(root, 'Edit Draft post')).toBeDefined();
+		await view.onClose();
+		expect(search.client.dispose).toHaveBeenCalledTimes(1);
+	});
+
 	it('should open a task-only global search overlay with task controls', async () => {
 		const vault = createVault({
 			'04_Projects/Blogging.md': OTHER_MARKDOWN,
@@ -1106,6 +1337,7 @@ tavern: project
 
 		searchInput.value = 'draft';
 		searchInput.dispatch('input');
+		await waitForSearchResults(root);
 
 		const overlay = findByClass(root, 'tavern-search-overlay');
 		if (!overlay) {
@@ -1149,6 +1381,7 @@ tavern: project
 		}
 		searchInput.value = 'Draft';
 		searchInput.dispatch('input');
+		await waitForSearchResults(root);
 
 		const overlay = findByClass(root, 'tavern-search-overlay');
 		const label = overlay && findByAriaLabel(overlay, 'Edit Draft post');
@@ -1178,6 +1411,59 @@ tavern: project
 		await vi.waitFor(() => expect(vault.modify).toHaveBeenCalledTimes(1));
 
 		expect(files['04_Projects/Blogging.md']).toContain('- [ ] Publish the draft');
+	});
+
+	it('retains a search edit through backdrop dismissal and a failed pending save until retry succeeds', async () => {
+		const { Notice } = await import('obsidian');
+		const files = { '04_Projects/Blogging.md': OTHER_MARKDOWN };
+		const vault = createVault(files);
+		let rejectSave: (error: Error) => void = () => {
+			throw new Error('Search edit did not start saving.');
+		};
+		// eslint-disable-next-line promise/avoid-new -- hold the actual vault write across overlay dismissal.
+		const pendingSave = new Promise<void>((_resolve, reject) => {
+			rejectSave = reject;
+		});
+		vault.modify.mockImplementationOnce(() => pendingSave);
+		const view = new TavernView({} as never, {
+			saveSettings: vi.fn(),
+			settings: { boardTaskKeys: [], projectFolders: ['04_Projects'], tavernName: 'Tavern' },
+			vault,
+		});
+		await view.onOpen();
+		view.openTaskSearch();
+		const root = rootElements.at(-1)!;
+		const searchInput = findByAriaLabel(root, 'Search Tavern tasks')!;
+		searchInput.value = 'draft';
+		searchInput.dispatch('input');
+		await waitForSearchResults(root);
+		const overlay = findByClass(root, 'tavern-search-overlay')!;
+		findByAriaLabel(overlay, 'Edit Draft post')!.dispatch('click');
+		const editor = findByAriaLabel(overlay, 'Task text for Draft post')!;
+		editor.value = 'Publish the draft';
+		overlay.focus();
+		editor.dispatch('blur', { relatedTarget: overlay });
+		await vi.waitFor(() => expect(vault.modify).toHaveBeenCalledTimes(1));
+		overlay.dispatch('click');
+		expect(findByClass(root, 'tavern-search-overlay')).toBe(overlay);
+		expect(findByAriaLabel(root, 'Task text for Draft post')).toBe(editor);
+
+		rejectSave(new Error('Disk unavailable'));
+		await vi.waitFor(() => expect(Notice).toHaveBeenCalledWith('Tavern could not edit the task.'));
+		await vi.waitFor(() => expect(editor.disabled).toBe(false));
+		expect(findByClass(root, 'tavern-search-overlay')).toBe(overlay);
+		expect(findByAriaLabel(root, 'Task text for Draft post')).toBe(editor);
+		expect(editor.value).toBe('Publish the draft');
+		expect(files['04_Projects/Blogging.md']).toBe(OTHER_MARKDOWN);
+
+		editor.focus();
+		overlay.focus();
+		editor.dispatch('blur', { relatedTarget: overlay });
+		overlay.dispatch('click');
+		await vi.waitFor(() => expect(findByClass(root, 'tavern-search-overlay')).toBeUndefined());
+		expect(files['04_Projects/Blogging.md']).toContain('- [ ] Publish the draft');
+		expect(vault.modify).toHaveBeenCalledTimes(2);
+		await view.onClose();
 	});
 
 	it('should close the global search overlay from escape without bubbling to obsidian', async () => {
@@ -1241,6 +1527,7 @@ tavern: project
 
 		searchInput.value = 'blog';
 		searchInput.dispatch('input');
+		await waitForSearchResults(root);
 		searchInput.dispatch('keydown', { key: 'Enter', preventDefault: vi.fn() });
 		findByClass(root, 'tavern-search-overlay')?.dispatch('click');
 		expect(findByClass(root, 'tavern-search-overlay')).toBeUndefined();
@@ -1308,6 +1595,7 @@ tavern: project
 		}
 		overlayInput.value = 'zzzz';
 		overlayInput.dispatch('input');
+		await waitForSearchResults(root);
 
 		expect(textValues(findByClass(root, 'tavern-search-overlay') as FakeElement)).toContain(
 			'No matching open tasks.',
@@ -1343,6 +1631,7 @@ tavern: project
 
 		searchInput.value = 'blog';
 		searchInput.dispatch('input');
+		await waitForSearchResults(root);
 		const pinButton = findByAriaLabel(root, 'Queue task');
 		if (!pinButton) {
 			throw new Error('overlay queue button was not rendered');
@@ -1379,6 +1668,7 @@ tavern: project
 
 		searchInput.value = 'draft';
 		searchInput.dispatch('input');
+		await waitForSearchResults(root);
 		const overlay = findByClass(root, 'tavern-search-overlay');
 		if (!overlay) {
 			throw new Error('search overlay was not rendered');
@@ -1427,6 +1717,7 @@ tavern: project
 
 		searchInput.value = 'draft';
 		searchInput.dispatch('input');
+		await waitForSearchResults(root);
 		const overlay = findByClass(root, 'tavern-search-overlay');
 		if (!overlay) {
 			throw new Error('search overlay was not rendered');
@@ -1466,6 +1757,7 @@ tavern: project
 
 		searchInput.value = 'draft';
 		searchInput.dispatch('input');
+		await waitForSearchResults(root);
 		const checkbox = findByAriaLabel(root, 'Complete Draft post');
 		const taskEl = checkbox?.parent;
 		if (!taskEl) {
@@ -1509,6 +1801,7 @@ tavern: project
 
 		searchInput.value = 'draft';
 		searchInput.dispatch('input');
+		await waitForSearchResults(root);
 		const overlay = findByClass(root, 'tavern-search-overlay');
 		if (!overlay) {
 			throw new Error('search overlay was not rendered');
@@ -1555,6 +1848,7 @@ tavern: project
 
 		searchInput.value = 'empty';
 		searchInput.dispatch('input');
+		await waitForSearchResults(root);
 		const overlay = findByClass(root, 'tavern-search-overlay');
 		if (!overlay) {
 			throw new Error('search overlay was not rendered');
@@ -2520,6 +2814,7 @@ tavern: project
 			if (surface === 'search') {
 				filter().value = 'Next';
 				filter().dispatch('input');
+				await waitForSearchResults(root);
 			}
 			row('Next task')!.dispatch('contextmenu');
 			await vi.waitFor(() => expect(menuItems.length).toBeGreaterThan(0));
@@ -2531,6 +2826,9 @@ tavern: project
 			menuItems.length = 0;
 			filter().value = 'Parent';
 			filter().dispatch('input');
+			if (surface === 'search') {
+				await waitForSearchResults(root);
+			}
 			expect(row('Child task')).toBeUndefined();
 			if (surface === 'project') {
 				findByAriaLabel(root, 'Edit Parent task')!.dispatch('click');

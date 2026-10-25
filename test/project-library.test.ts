@@ -1,7 +1,9 @@
+/* eslint-disable eslint/max-statements, eslint/no-magic-numbers */
 /* eslint-disable eslint/func-style, eslint/no-magic-numbers */
 import { Effect } from 'effect';
 import {
 	buildProjectLibrary,
+	createProjectLibraryBuilder,
 	filterProjects,
 	filterTasks,
 	projectTasks,
@@ -188,6 +190,64 @@ describe('project library', () => {
 				['Root', 'Projects'],
 				['Waiting', 'Waiting'],
 			]);
+		});
+	});
+
+	describe('createProjectLibraryBuilder', () => {
+		it('should preserve unchanged revisions and reuse unaffected project summaries', () => {
+			const build = createProjectLibraryBuilder();
+			const files = [
+				buildFile({}),
+				buildFile({ markdown: BLOGGING_MARKDOWN, path: '04_Projects/Blogging.md' }),
+			];
+			const input = { files, folders: ['04_Projects'] };
+			const first = Effect.runSync(build(input));
+			const unchanged = Effect.runSync(
+				build({ ...input, files: files.map((file) => ({ ...file })) }),
+			);
+
+			expect(unchanged).toBe(first);
+			files[0]!.markdown = PI_MARKDOWN.replace('Wire library', 'Wire updated library');
+			const changed = Effect.runSync(build(input));
+			expect(changed).not.toBe(first);
+			expect(changed.projects[0]).toBe(first.projects[0]);
+			expect(changed.projects[1]).not.toBe(first.projects[1]);
+			expect(projectTasks(changed).map((task) => task.text)).toContain('Wire updated library');
+		});
+
+		it.each(['deleted', 'folder excluded', 'renamed'])(
+			'should retire cached summaries when a file is %s',
+			(reason) => {
+				const build = createProjectLibraryBuilder();
+				const file = buildFile({});
+				const originalPath = file.path;
+				const input = { files: [file], folders: ['04_Projects'] };
+				const first = Effect.runSync(build(input));
+				if (reason === 'deleted') {
+					input.files = [];
+				} else if (reason === 'folder excluded') {
+					input.folders = ['05_Areas'];
+				} else {
+					file.path = '04_Projects/Renamed.md';
+				}
+				const removed = Effect.runSync(build(input));
+				expect(removed.projects.map((project) => project.path)).not.toContain(originalPath);
+				file.path = originalPath;
+				const restored = Effect.runSync(build({ files: [file], folders: ['04_Projects'] }));
+				expect(restored.projects[0]).not.toBe(first.projects[0]);
+				expect(restored.projects[0]?.path).toBe(originalPath);
+			},
+		);
+
+		it('should keep uncached library builds independent of caller mutations', () => {
+			const input = { files: [buildFile({})], folders: ['04_Projects'] };
+			const first = Effect.runSync(buildProjectLibrary(input));
+			first.projects[0]!.title = 'Locally changed';
+			first.projects[0]!.note.sections[0]!.tasks[0]!.text = 'Locally changed task';
+			const second = Effect.runSync(buildProjectLibrary(input));
+
+			expect(second.projects[0]?.title).toBe('Pi');
+			expect(projectTasks(second)[0]?.text).toBe('Wire library');
 		});
 	});
 

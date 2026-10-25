@@ -7,6 +7,7 @@ status: reference
 - [Standards](standards.md) — read for any repository change, especially project discovery, plugin lifecycle, platform support, privacy, or settings.
 - [Releases](architecture/releases.md) — read when changing release generation, validation, version metadata, or published assets.
 - [Project workflow](architecture/project-workflow.md) — read when changing project sections, task completion, nested tasks, search, or the focus queue.
+- [Task search](architecture/task-search.md) — read for global search matching, prepared source revisions, worker transport/lifetime, pending results, and performance validation.
 - [Task editing](architecture/task-editing.md) — read when changing task text editors, keyboard capture, context-menu deletion, empty-row cleanup, or draft continuity.
 - [Task keyboard editing decision](decisions/2026-10-24-task-keyboard-editing.md) — read for the historical human choices of task creation shortcuts and promoting children when an empty parent is removed.
 - [Persistent task capture decision](decisions/2026-10-25-persistent-task-capture.md) — read for the human distinction between permanent add-task prompts and removable empty inline drafts.

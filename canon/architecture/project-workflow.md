@@ -49,7 +49,7 @@ task references and restores their nesting on reopen; reordering a selected
 parent carries its tree as a block. References that no longer resolve are
 ignored. Persistence limitations belong to the persistence page.
 
-Global task search returns task rows across projects, with controls for opening
+Global task search follows the [task-search contract](task-search.md) and returns task rows across projects, with controls for opening
 the source project, completing tasks, and changing queue selection. A project
 with no matching tasks does not become a task result merely because its title
 matches.

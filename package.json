@@ -39,7 +39,8 @@
 		"knip": "knip --cache --strict",
 		"knip:watch": "knip --watch --strict",
 		"knip:ci": "knip --cache --strict",
-		"release:verify": "node scripts/verify-release.mjs"
+		"release:verify": "node scripts/verify-release.mjs",
+		"benchmark:search": "node scripts/benchmark-task-search.mjs"
 	},
 	"dependencies": {
 		"effect": "^3.21.2",

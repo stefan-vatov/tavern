@@ -41,6 +41,12 @@
 			"rules": {
 				"import/no-nodejs-modules": "off"
 			}
+		},
+		{
+			"files": ["scripts/benchmark-task-search.mjs"],
+			"rules": {
+				"import/no-nodejs-modules": "off"
+			}
 		}
 	]
 }

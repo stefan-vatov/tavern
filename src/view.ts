@@ -6,6 +6,7 @@ import type { DailyLogController } from './daily-log-controller';
 import DailyLogPane from './daily-log-pane';
 import { projectTaskHasChildren } from './project-actions';
 import {
+	createProjectLibraryBuilder,
 	filterTasks,
 	projectTasks,
 	taskSelectionKey,
@@ -33,6 +34,12 @@ import addTaskDeleteItems from './task-context-menu';
 import type { TaskDeleteMode, TaskEditPlan } from './task-edit';
 import showTaskEditRecovery from './task-edit-recovery';
 import { createTaskTextEditor, type TaskTextEditor } from './task-text-editor';
+import {
+	createTaskSearchClient,
+	type TaskSearchClient,
+	type SearchResult,
+	type SearchRequest,
+} from './task-search-service';
 
 const LIST_RESIZE = {
 	cssVar: '--tavern-list-width',
@@ -58,6 +65,7 @@ type SidebarProjectSection = {
 };
 
 type TavernViewDeps = {
+	taskSearch?: TaskSearchClient;
 	dailyLogs?: DailyLogController;
 	saveSettings: () => Promise<void>;
 	settings: TavernSettings;
@@ -105,6 +113,33 @@ class TavernView extends ItemView {
 	private query = '';
 	private searchOverlayEl: HTMLElement | null = null;
 	private searchOverlayOpen = false;
+	private searchInput: HTMLInputElement | undefined;
+	private searchResults: HTMLElement | undefined;
+	private searchEvents: Component | undefined;
+	private searchRowEvents: Component | undefined;
+	private readonly searchEditors = new Set<TaskTextEditor>();
+	private renderEvents: Component = this;
+	private searchClient: TaskSearchClient | undefined;
+	private searchAbort: AbortController | undefined;
+	private searchSession = 0;
+	private searchGeneration = 0;
+	private searchRevision = 0;
+	private searchLibrary: ProjectLibrary | undefined;
+	private searchPreparation: Promise<unknown> = Promise.resolve();
+	private searchTasks = new Map<string, ProjectBoardTask>();
+	private searchPending = false;
+	private searchRequestKey = '';
+	private searchPresentationKey = '';
+	private searchResult: SearchResult | undefined;
+	private readonly libraryBuilder = createProjectLibraryBuilder();
+	private boardCache:
+		| {
+				library: ProjectLibrary;
+				keys: string[];
+				path: string;
+				model: ReturnType<typeof createProjectBoardModel>;
+		  }
+		| undefined;
 	private selectedPath = '';
 	private sidebarCollapsedSections: Set<string>;
 	private sidebarOpen = false;
@@ -171,11 +206,15 @@ class TavernView extends ItemView {
 		// eslint-disable-next-line eslint/no-underscore-dangle
 		// eslint-disable-next-line eslint/no-underscore-dangle
 		this.closed = true;
+		this.searchAbort?.abort();
 		this.unsubscribeTaskReferences?.();
 		this.unsubscribeTaskReferences = undefined;
 		// Closing must not wait indefinitely for vault I/O; pending saves still report through their callbacks.
 		// eslint-disable-next-line promise/prefer-await-to-then
 		void this.finishTaskEditing().catch(() => {});
+		this.closeSearchOverlay(false);
+		await this.searchClient?.dispose();
+		this.searchClient = undefined;
 		for (const editor of this.activeEditors) {
 			editor.dispose();
 		}
@@ -267,7 +306,11 @@ class TavernView extends ItemView {
 		this.errorMessage = null;
 
 		const exit = await Effect.runPromiseExit(
-			loadVaultProjectLibrary(this.deps.vault, this.deps.settings.projectFolders),
+			loadVaultProjectLibrary(
+				this.deps.vault,
+				this.deps.settings.projectFolders,
+				this.libraryBuilder,
+			),
 		);
 
 		if (this.closed || revision !== this.refreshRevision) {
@@ -292,13 +335,29 @@ class TavernView extends ItemView {
 		}
 
 		this.library = exit.value;
+		this.prepareTaskSearch();
 
 		// Always prune stale boardTaskKeys on refresh (after any mutation or external edit). Uses Map/filter-equivalent logic (like selectedProjectTasks) to drop keys no longer resolving to live tasks post-renumber (text/line/section changes baked in createTaskId). Prevents bloat and surprise drops from persisted focus queue. Migration for text edits (see editTask) re-inserts surviving keys after prune.
 		/* c8 ignore next -- prune + migration branches exercised in integration but add branch coverage here; core paths covered */
 		const tasks = projectTasks(this.library);
-		const completedTreeKeys = new Set(
-			tasks.filter((task) => task.checked).flatMap((task) => taskTreeKeys(tasks, task)),
-		);
+		const completedTreeKeys = new Set<string>();
+		for (const project of this.library.projects) {
+			for (const section of project.note.sections) {
+				let completedDepth: number | undefined = undefined;
+				for (const task of section.tasks) {
+					const depth = indentWidth(task.indent);
+					if (completedDepth !== undefined && depth <= completedDepth) {
+						completedDepth = undefined;
+					}
+					if (task.checked && completedDepth === undefined) {
+						completedDepth = depth;
+					}
+					if (completedDepth !== undefined) {
+						completedTreeKeys.add(`${project.path}::${task.id}`);
+					}
+				}
+			}
+		}
 		const currentTaskKeys = new Set(
 			tasks.filter((task) => !task.checked).map((task) => taskSelectionKey(task)),
 		);
@@ -334,6 +393,10 @@ class TavernView extends ItemView {
 			return;
 		}
 		if (this.hasInlineEditors()) {
+			return;
+		}
+		if (this.searchOverlayOpen) {
+			this.renderSearchOverlay();
 			return;
 		}
 		this.dragCleanup?.();
@@ -451,7 +514,7 @@ class TavernView extends ItemView {
 					'aria-label': `Toggle ${section.title} projects`,
 				},
 			});
-			this.registerDomEvent(header, 'click', () => {
+			this.renderEvents.registerDomEvent(header, 'click', () => {
 				this.toggleSidebarSection(section.title);
 			});
 			header.createSpan({ cls: 'tavern-sidebar-section-title', text: section.title });
@@ -493,17 +556,17 @@ class TavernView extends ItemView {
 			type: 'text',
 			value: this.query,
 		});
-		this.registerDomEvent(input, 'focus', () => {
+		this.renderEvents.registerDomEvent(input, 'focus', () => {
 			this.openSearchOverlay();
 		});
-		this.registerDomEvent(input, 'click', () => {
+		this.renderEvents.registerDomEvent(input, 'click', () => {
 			this.openSearchOverlay();
 		});
-		this.registerDomEvent(input, 'input', () => {
+		this.renderEvents.registerDomEvent(input, 'input', () => {
 			this.query = input.value;
 			this.openSearchOverlay();
 		});
-		this.registerDomEvent(input, 'keydown', (event) => {
+		this.renderEvents.registerDomEvent(input, 'keydown', (event) => {
 			if (event.key === 'Escape') {
 				event.preventDefault();
 				event.stopImmediatePropagation();
@@ -514,6 +577,9 @@ class TavernView extends ItemView {
 	}
 
 	private openSearchOverlay(): void {
+		if (!this.searchOverlayOpen) {
+			this.searchSession += 1;
+		}
 		this.searchOverlayOpen = true;
 		this.pushSearchOverlayScope();
 		this.renderSearchOverlay();
@@ -524,8 +590,41 @@ class TavernView extends ItemView {
 	}
 
 	private closeSearchOverlay(rerenderShell = true): void {
+		const editors = [...this.searchEditors].filter((editor) => this.activeEditors.has(editor));
+		if (!this.closed && editors.length > 0) {
+			const { searchSession: session, query } = this;
+			void (async () => {
+				try {
+					await Promise.all(editors.map((editor) => editor.commit()));
+				} catch {
+					return;
+				}
+				if (!this.closed && this.searchSession === session && this.query === query) {
+					this.closeSearchOverlay(rerenderShell);
+				}
+			})();
+			return;
+		}
 		const shouldRerender = rerenderShell && (this.searchOverlayOpen || this.query.length > 0);
 		this.searchOverlayOpen = false;
+		this.searchSession += 1;
+		this.searchGeneration += 1;
+		this.searchAbort?.abort();
+		this.searchAbort = undefined;
+		this.searchRequestKey = '';
+		this.searchPresentationKey = '';
+		this.searchResult = undefined;
+		this.searchPending = false;
+		this.searchInput = undefined;
+		this.searchResults = undefined;
+		if (this.searchRowEvents) {
+			this.removeChild(this.searchRowEvents);
+			this.searchRowEvents = undefined;
+		}
+		if (this.searchEvents) {
+			this.removeChild(this.searchEvents);
+			this.searchEvents = undefined;
+		}
 		this.query = '';
 		this.searchOverlayEl?.remove();
 		this.searchOverlayEl = null;
@@ -561,33 +660,67 @@ class TavernView extends ItemView {
 		this.overlayScope = null;
 	}
 
+	private prepareTaskSearch(): void {
+		if (this.searchLibrary === this.library && this.searchClient) {
+			return;
+		}
+		this.searchLibrary = this.library;
+		this.searchRevision += 1;
+		if (this.searchOverlayOpen) {
+			this.searchAbort?.abort();
+			this.setSearchPending(true);
+		}
+		this.searchTasks = new Map(
+			projectTasks(this.library).map((task) => [taskSelectionKey(task), task]),
+		);
+		this.searchClient ??= this.deps.taskSearch ?? createTaskSearchClient();
+		this.searchPreparation = this.searchClient.prepare(
+			this.searchRevision,
+			[...this.searchTasks].map(([id, task]) => ({
+				id,
+				text: task.text,
+				sectionName: task.sectionName,
+				projectTitle: task.projectTitle,
+				projectPath: task.projectPath,
+				checked: task.checked,
+			})),
+		);
+		// Preparation is shared by queries. A failed prewarm is surfaced when search opens.
+		void (async () => {
+			try {
+				await this.searchPreparation;
+			} catch {}
+		})();
+		this.searchRequestKey = '';
+	}
+
 	private renderSearchOverlay(): void {
-		this.searchOverlayEl?.remove();
 		if (!this.searchOverlayOpen) {
 			return;
 		}
-
+		if (this.searchOverlayEl) {
+			if (this.searchInput && this.searchInput.value !== this.query) {
+				this.searchInput.value = this.query;
+			}
+			void this.requestTaskSearch();
+			return;
+		}
+		const events = this.addChild(new Component());
+		this.searchEvents = events;
 		const overlay = this.contentEl.createDiv('tavern-search-overlay');
 		this.searchOverlayEl = overlay;
-		this.registerDomEvent(
-			overlay,
-			'keydown',
-			(event) => {
-				if (event.key === 'Escape') {
-					event.preventDefault();
-					event.stopImmediatePropagation();
-					event.stopPropagation();
-					this.closeSearchOverlay();
-				}
-			},
-			{ capture: true },
-		);
-		this.registerDomEvent(overlay, 'click', () => {
-			this.closeSearchOverlay();
-		});
-
+		const closeOnEscape = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') {
+				event.preventDefault();
+				event.stopImmediatePropagation();
+				event.stopPropagation();
+				this.closeSearchOverlay();
+			}
+		};
+		events.registerDomEvent(overlay, 'keydown', closeOnEscape, { capture: true });
+		events.registerDomEvent(overlay, 'click', () => this.closeSearchOverlay());
 		const panel = overlay.createDiv('tavern-search-overlay-panel');
-		this.registerDomEvent(panel, 'click', (event) => event.stopPropagation());
+		events.registerDomEvent(panel, 'click', (event) => event.stopPropagation());
 		const input = panel.createEl('input', {
 			attr: { 'aria-label': 'Search Tavern tasks' },
 			cls: 'tavern-search-input tavern-search-overlay-input',
@@ -595,48 +728,176 @@ class TavernView extends ItemView {
 			type: 'text',
 			value: this.query,
 		});
-		this.registerDomEvent(input, 'input', () => {
+		this.searchInput = input;
+		events.registerDomEvent(input, 'keydown', closeOnEscape);
+		events.registerDomEvent(input, 'input', () => {
 			this.query = input.value;
-			this.renderSearchOverlay();
+			void this.requestTaskSearch();
 		});
-		this.registerDomEvent(input, 'keydown', (event) => {
-			if (event.key === 'Escape') {
-				event.preventDefault();
-				event.stopImmediatePropagation();
-				event.stopPropagation();
-				this.closeSearchOverlay();
-			}
-		});
-
-		const results = panel.createDiv('tavern-search-results');
-		this.renderSearchResults(results);
+		this.searchResults = panel.createDiv('tavern-search-results');
+		this.searchResults.setAttribute('aria-label', 'Task search results');
 		input.focus();
+		void this.requestTaskSearch();
 	}
 
-	private renderSearchResults(containerEl: HTMLElement): void {
-		if (this.activeEditors.size > 0) {
+	private setSearchPending(pending: boolean): void {
+		this.searchPending = pending;
+		if (!this.searchResults) {
 			return;
 		}
-		const query = this.query.trim();
-		if (query.length === 0) {
-			containerEl.createDiv({
+		this.searchResults.inert = pending;
+		this.searchResults.setAttribute('aria-busy', String(pending));
+		if (pending) {
+			this.searchResults.addClass('is-pending');
+		} else {
+			this.searchResults.removeClass('is-pending');
+		}
+	}
+
+	private async requestTaskSearch(): Promise<void> {
+		if (!this.searchOverlayOpen || this.closed) {
+			return;
+		}
+		this.prepareTaskSearch();
+		const { query } = this;
+		const key = JSON.stringify([this.searchSession, this.searchRevision, query]);
+		if (key === this.searchRequestKey) {
+			if (!this.searchPending && this.searchResult) {
+				this.renderSearchResults(this.searchResult);
+			}
+			return;
+		}
+		this.searchRequestKey = key;
+		this.searchAbort?.abort();
+		const abort = new AbortController();
+		this.searchAbort = abort;
+		const session = this.searchSession;
+		const revision = this.searchRevision;
+		const generation = ++this.searchGeneration;
+		const request = { session, generation, revision, query };
+		if (!query.trim()) {
+			this.searchResult = undefined;
+			this.setSearchPending(false);
+			this.clearSearchRows();
+			this.searchResults?.createDiv({
 				cls: 'tavern-search-empty',
 				text: 'Start typing to search open tasks.',
 			});
 			return;
 		}
+		this.setSearchPending(true);
+		try {
+			await this.searchPreparation;
+			if (!this.currentSearch(request)) {
+				return;
+			}
+			const result = await this.searchClient!.search(
+				{ session, generation, revision, query },
+				abort.signal,
+			);
+			if (!this.currentSearch(request)) {
+				return;
+			}
+			this.searchResult = result;
+			this.setSearchPending(false);
+			this.renderSearchResults(result);
+		} catch (error) {
+			if (abort.signal.aborted || !this.currentSearch(request)) {
+				return;
+			}
+			this.searchResult = undefined;
+			this.setSearchPending(false);
+			this.clearSearchRows();
+			let message = String(error);
+			if (error instanceof Error) {
+				({ message } = error);
+			}
+			this.searchResults?.createDiv({
+				cls: 'tavern-search-empty',
+				text: `Task search failed: ${message}`,
+			});
+			const retry = this.searchResults?.createEl('button', { text: 'Retry search' });
+			if (retry && this.searchRowEvents) {
+				this.searchRowEvents.registerDomEvent(retry, 'click', () => void this.retryTaskSearch());
+			}
+		}
+	}
 
-		const tasks = filterTasks(
-			projectTasks(this.library).filter((task) => !task.checked),
-			query,
-		).slice(0, 50);
-		if (tasks.length === 0) {
-			containerEl.createDiv({ cls: 'tavern-search-empty', text: 'No matching open tasks.' });
+	private currentSearch(request: SearchRequest): boolean {
+		return (
+			!this.closed &&
+			this.searchOverlayOpen &&
+			this.searchSession === request.session &&
+			this.searchGeneration === request.generation &&
+			this.searchRevision === request.revision &&
+			this.query === request.query
+		);
+	}
+
+	private async retryTaskSearch(): Promise<void> {
+		const session = this.searchSession;
+		this.setSearchPending(true);
+		try {
+			await this.searchClient?.retry();
+		} catch {
+			// The request path presents initialization failures with the same retry action.
+		}
+		if (!this.closed && this.searchOverlayOpen && this.searchSession === session) {
+			this.searchLibrary = undefined;
+			this.prepareTaskSearch();
+			void this.requestTaskSearch();
+		}
+	}
+
+	private clearSearchRows(): void {
+		if (this.searchRowEvents) {
+			this.removeChild(this.searchRowEvents);
+		}
+		this.searchRowEvents = this.addChild(new Component());
+		this.searchResults?.empty();
+		this.searchPresentationKey = '';
+	}
+
+	private renderSearchResults(result: SearchResult): void {
+		if (!this.searchResults || this.activeEditors.size > 0) {
 			return;
 		}
-
-		for (const task of tasks) {
-			this.renderTaskSearchResult(containerEl, task);
+		const tasks = result.ids.flatMap((id) => {
+			const task = this.searchTasks.get(id);
+			if (task) {
+				return [task];
+			}
+			return [];
+		});
+		const key = JSON.stringify([
+			result.revision,
+			result.total,
+			result.ids,
+			tasks.map((task) => this.isTaskSelected(task)),
+		]);
+		if (key === this.searchPresentationKey) {
+			return;
+		}
+		this.clearSearchRows();
+		this.searchResults.setAttribute(
+			'aria-label',
+			`${result.total} matching open tasks. Showing ${tasks.length}.`,
+		);
+		this.searchPresentationKey = key;
+		const previous = this.renderEvents;
+		this.renderEvents = this.searchRowEvents!;
+		try {
+			if (!tasks.length) {
+				this.searchResults.createDiv({
+					cls: 'tavern-search-empty',
+					text: 'No matching open tasks.',
+				});
+			}
+			for (const task of tasks) {
+				this.renderTaskSearchResult(this.searchResults, task);
+			}
+		} finally {
+			this.renderEvents = previous;
 		}
 	}
 
@@ -651,10 +912,10 @@ class TavernView extends ItemView {
 		if (this.isTaskSelected(task)) {
 			row.addClass('is-in-global-queue');
 		}
-		this.registerDomEvent(row, 'click', () => {
+		this.renderEvents.registerDomEvent(row, 'click', () => {
 			this.openTaskProject(task);
 		});
-		this.registerDomEvent(row, 'contextmenu', (event) => {
+		this.renderEvents.registerDomEvent(row, 'contextmenu', (event) => {
 			void this.showTaskContextMenu(event, task);
 		});
 
@@ -663,10 +924,10 @@ class TavernView extends ItemView {
 			type: 'checkbox',
 		});
 		checkbox.checked = task.checked;
-		this.registerDomEvent(checkbox, 'click', (event) => {
+		this.renderEvents.registerDomEvent(checkbox, 'click', (event) => {
 			event.stopPropagation();
 		});
-		this.registerDomEvent(checkbox, 'change', () => {
+		this.renderEvents.registerDomEvent(checkbox, 'change', () => {
 			if (checkbox.checked) {
 				void this.completeTask(task);
 			}
@@ -710,7 +971,7 @@ class TavernView extends ItemView {
 		});
 		meta.createSpan({ cls: 'tavern-meta-item', text: `${openTaskCount} open` });
 
-		this.registerDomEvent(card, 'click', () => {
+		this.renderEvents.registerDomEvent(card, 'click', () => {
 			const animateDetail = this.boardPage !== 'global';
 			this.boardPage = 'global';
 			this.sidebarOpen = false;
@@ -730,7 +991,7 @@ class TavernView extends ItemView {
 		header.createSpan({ cls: 'tavern-skill-name', text: project.title });
 		this.renderProjectMeta(card, openTaskCount);
 
-		this.registerDomEvent(card, 'click', () => {
+		this.renderEvents.registerDomEvent(card, 'click', () => {
 			const animateDetail = this.boardPage !== 'project' || this.selectedPath !== project.path;
 			this.boardPage = 'project';
 			if (this.selectedPath !== project.path) {
@@ -861,7 +1122,7 @@ class TavernView extends ItemView {
 			value: this.globalTaskQuery,
 		});
 		this.detailFilterInput = input;
-		this.registerDomEvent(input, 'input', () => {
+		this.renderEvents.registerDomEvent(input, 'input', () => {
 			this.globalTaskQuery = input.value;
 			onInput();
 		});
@@ -884,7 +1145,7 @@ class TavernView extends ItemView {
 			collapseIcon = 'chevron-right';
 		}
 		setIcon(collapseButton, collapseIcon);
-		this.registerDomEvent(collapseButton, 'click', () => {
+		this.renderEvents.registerDomEvent(collapseButton, 'click', () => {
 			this.availableTasksCollapsed = !this.availableTasksCollapsed;
 			this.deps.settings.availableTasksCollapsed = this.availableTasksCollapsed;
 			void this.deps.saveSettings();
@@ -923,7 +1184,7 @@ class TavernView extends ItemView {
 			attr: { 'aria-label': 'Refresh projects' },
 		});
 		setIcon(refreshButton, 'refresh-cw');
-		this.registerDomEvent(refreshButton, 'click', () => {
+		this.renderEvents.registerDomEvent(refreshButton, 'click', () => {
 			void this.refreshProjects();
 		});
 
@@ -948,7 +1209,7 @@ class TavernView extends ItemView {
 			attr: { 'aria-label': 'Refresh projects' },
 		});
 		setIcon(refreshButton, 'refresh-cw');
-		this.registerDomEvent(refreshButton, 'click', () => {
+		this.renderEvents.registerDomEvent(refreshButton, 'click', () => {
 			void this.refreshProjects();
 		});
 	}
@@ -962,7 +1223,7 @@ class TavernView extends ItemView {
 			},
 		});
 		setIcon(toggle, 'panel-left');
-		this.registerDomEvent(toggle, 'click', () => {
+		this.renderEvents.registerDomEvent(toggle, 'click', () => {
 			this.sidebarOpen = !this.sidebarOpen;
 			this.renderShell();
 		});
@@ -984,6 +1245,7 @@ class TavernView extends ItemView {
 	private renderProjectSections(containerEl: HTMLElement, project: ProjectSummary): void {
 		for (const section of project.note.sections) {
 			const filteredTasks = filterTasks(section.tasks, this.projectQuery);
+			const visibleTasks = new Set(filteredTasks);
 			const sectionEl = containerEl.createDiv('tavern-project-section');
 			const sectionHeader = sectionEl.createDiv('tavern-project-section-header');
 			sectionHeader.createDiv({ cls: 'tavern-project-section-title', text: section.name });
@@ -991,13 +1253,13 @@ class TavernView extends ItemView {
 				cls: 'tavern-project-section-count',
 				text: `${filteredTasks.length}`,
 			});
-			this.registerDomEvent(sectionEl, 'dragover', (event) => {
+			this.renderEvents.registerDomEvent(sectionEl, 'dragover', (event) => {
 				this.markDropTarget(event, sectionEl);
 			});
-			this.registerDomEvent(sectionEl, 'dragleave', () => {
+			this.renderEvents.registerDomEvent(sectionEl, 'dragleave', () => {
 				this.clearDropTarget(sectionEl);
 			});
-			this.registerDomEvent(sectionEl, 'drop', (event) => {
+			this.renderEvents.registerDomEvent(sectionEl, 'drop', (event) => {
 				event.preventDefault();
 				this.clearDropTarget(sectionEl);
 				const task = this.projectTaskFromDrop(project.path, event);
@@ -1010,7 +1272,7 @@ class TavernView extends ItemView {
 			for (const line of section.lines) {
 				if (line.type === 'text') {
 					this.renderMarkdownLine(sectionEl, line.raw);
-				} else if (filterTasks([line.task], this.projectQuery).length > 0) {
+				} else if (visibleTasks.has(line.task)) {
 					this.renderTask(sectionEl, project, line.task);
 					renderedTaskCount += 1;
 				}
@@ -1076,8 +1338,8 @@ class TavernView extends ItemView {
 			}
 		});
 		this.projectCaptures.set(key, { form, input, editor });
-		this.registerDomEvent(button, 'mousedown', (event) => event.preventDefault());
-		this.registerDomEvent(button, 'click', async (event) => {
+		this.renderEvents.registerDomEvent(button, 'mousedown', (event) => event.preventDefault());
+		this.renderEvents.registerDomEvent(button, 'click', async (event) => {
 			event.preventDefault();
 			event.stopPropagation();
 			try {
@@ -1099,7 +1361,7 @@ class TavernView extends ItemView {
 			value: this.projectQuery,
 		});
 		this.detailFilterInput = input;
-		this.registerDomEvent(input, 'input', () => {
+		this.renderEvents.registerDomEvent(input, 'input', () => {
 			this.projectQuery = input.value;
 			onInput();
 		});
@@ -1140,13 +1402,13 @@ class TavernView extends ItemView {
 				this.rememberDailySource(event, boardTask);
 			}
 		});
-		this.registerDomEvent(taskEl, 'dragover', (event) => {
+		this.renderEvents.registerDomEvent(taskEl, 'dragover', (event) => {
 			this.markTaskDropTarget(event, taskEl);
 		});
-		this.registerDomEvent(taskEl, 'dragleave', () => {
+		this.renderEvents.registerDomEvent(taskEl, 'dragleave', () => {
 			this.clearTaskDropTarget(taskEl);
 		});
-		this.registerDomEvent(taskEl, 'drop', (event) => {
+		this.renderEvents.registerDomEvent(taskEl, 'drop', (event) => {
 			event.preventDefault();
 			event.stopPropagation();
 			this.clearTaskDropTarget(taskEl);
@@ -1155,7 +1417,7 @@ class TavernView extends ItemView {
 				void this.moveTaskToPosition(sourceTask, boardTask, taskDropPlacement(taskEl, event));
 			}
 		});
-		this.registerDomEvent(taskEl, 'contextmenu', (event) => {
+		this.renderEvents.registerDomEvent(taskEl, 'contextmenu', (event) => {
 			void this.showTaskContextMenu(event, boardTask);
 		});
 
@@ -1170,7 +1432,7 @@ class TavernView extends ItemView {
 		});
 		checkbox.checked = task.checked;
 		checkbox.disabled = task.checked && task.sectionName === DONE_SECTION_NAME && !canReopen;
-		this.registerDomEvent(checkbox, 'change', () => {
+		this.renderEvents.registerDomEvent(checkbox, 'change', () => {
 			if (checkbox.checked) {
 				void this.completeTask(boardTask);
 			} else if (canReopen && boardTask) {
@@ -1199,7 +1461,7 @@ class TavernView extends ItemView {
 			event.dataTransfer?.setData(TASK_QUEUE_KEY_MIME, taskSelectionKey(task));
 			this.setDailySource(event, task);
 		});
-		this.registerDomEvent(row, 'contextmenu', (event) => {
+		this.renderEvents.registerDomEvent(row, 'contextmenu', (event) => {
 			void this.showTaskContextMenu(event, task);
 		});
 		const checkbox = row.createEl('input', {
@@ -1207,7 +1469,7 @@ class TavernView extends ItemView {
 			type: 'checkbox',
 		});
 		checkbox.checked = task.checked;
-		this.registerDomEvent(checkbox, 'change', () => {
+		this.renderEvents.registerDomEvent(checkbox, 'change', () => {
 			if (checkbox.checked) {
 				void this.completeTask(task);
 			}
@@ -1239,15 +1501,15 @@ class TavernView extends ItemView {
 		});
 		handle.draggable = true;
 		setIcon(handle, 'grip-vertical');
-		this.registerDomEvent(handle, 'click', (event) => event.stopPropagation());
-		this.registerDomEvent(handle, 'dragstart', (event) => {
+		this.renderEvents.registerDomEvent(handle, 'click', (event) => event.stopPropagation());
+		this.renderEvents.registerDomEvent(handle, 'dragstart', (event) => {
 			row.addClass('is-dragging-task');
 			if (event.dataTransfer) {
 				event.dataTransfer.effectAllowed = 'copyMove';
 			}
 			onDragStart(event);
 		});
-		this.registerDomEvent(handle, 'dragend', () => {
+		this.renderEvents.registerDomEvent(handle, 'dragend', () => {
 			row.removeClass('is-dragging-task');
 		});
 	}
@@ -1281,7 +1543,7 @@ class TavernView extends ItemView {
 		}
 		toggleButton.createSpan({ cls: 'tavern-queue-shortcut', text: 'Q' });
 		toggleButton.createSpan({ cls: 'tavern-queue-toggle-label', text: label });
-		this.registerDomEvent(toggleButton, 'click', (event) => {
+		this.renderEvents.registerDomEvent(toggleButton, 'click', (event) => {
 			event.stopPropagation();
 			void this.toggleTaskSelection(task);
 		});
@@ -1324,7 +1586,11 @@ class TavernView extends ItemView {
 				}),
 			onEditingChange: (editing) => this.taskEditingChanged(editor, editing),
 		});
-		this.register(() => editor.dispose());
+		if (this.renderEvents === this.searchRowEvents) {
+			this.searchEditors.add(editor);
+			this.renderEvents.register(() => this.searchEditors.delete(editor));
+		}
+		this.renderEvents.register(() => editor.dispose());
 	}
 
 	private taskSubtreeEnd(row: HTMLElement, depth: number): HTMLElement {
@@ -1376,9 +1642,9 @@ class TavernView extends ItemView {
 			onEditingChange: (editing) => this.taskEditingChanged(editor, editing),
 		});
 		this.captureEditors.add(editor);
-		this.registerDomEvent(input, 'focus', () => editor.open());
-		this.registerDomEvent(input, 'input', () => editor.open());
-		this.register(() => editor.dispose());
+		this.renderEvents.registerDomEvent(input, 'focus', () => editor.open());
+		this.renderEvents.registerDomEvent(input, 'input', () => editor.open());
+		this.renderEvents.register(() => editor.dispose());
 		return editor;
 	}
 
@@ -1567,7 +1833,7 @@ class TavernView extends ItemView {
 			attr: { 'aria-label': `Move task ${direction}` },
 		});
 		setIcon(button, this.reorderIcon(direction));
-		this.registerDomEvent(button, 'click', (event) => {
+		this.renderEvents.registerDomEvent(button, 'click', (event) => {
 			event.stopPropagation();
 			void this.reorderTask(task, direction);
 		});
@@ -1582,9 +1848,14 @@ class TavernView extends ItemView {
 	}
 
 	private findBoardTask(projectPath: string, taskId: string): ProjectBoardTask | undefined {
-		return projectTasks(this.library).find(
-			(task) => task.projectPath === projectPath && task.id === taskId,
-		);
+		const project = this.library.projects.find((candidate) => candidate.path === projectPath);
+		const task = project?.note.sections
+			.flatMap((section) => section.tasks)
+			.find((candidate) => candidate.id === taskId);
+		if (!project || !task) {
+			return undefined;
+		}
+		return { ...task, projectPath, projectTitle: project.title };
 	}
 
 	private async completeTask(task: ProjectBoardTask | undefined): Promise<void> {
@@ -1854,13 +2125,13 @@ class TavernView extends ItemView {
 	private renderFocusQueue(containerEl: HTMLElement): void {
 		const selectedTasks = filterTasks(this.boardModel().focusTasks, this.globalTaskQuery);
 		const queue = containerEl.createDiv('tavern-focus-queue');
-		this.registerDomEvent(queue, 'dragover', (event) => {
+		this.renderEvents.registerDomEvent(queue, 'dragover', (event) => {
 			this.markDropTarget(event, queue);
 		});
-		this.registerDomEvent(queue, 'dragleave', () => {
+		this.renderEvents.registerDomEvent(queue, 'dragleave', () => {
 			this.clearDropTarget(queue);
 		});
-		this.registerDomEvent(queue, 'drop', (event) => {
+		this.renderEvents.registerDomEvent(queue, 'drop', (event) => {
 			event.preventDefault();
 			this.clearDropTarget(queue);
 			const draggedQueueKey = event.dataTransfer?.getData(QUEUE_KEY_MIME) ?? '';
@@ -1883,7 +2154,7 @@ class TavernView extends ItemView {
 		setIcon(heading.createSpan('tavern-focus-queue-chevron'), focusIcon);
 		heading.createSpan({ cls: 'tavern-focus-queue-title', text: 'Focus queue' });
 		header.createSpan({ cls: 'tavern-meta-item', text: `${selectedTasks.length} tasks` });
-		this.registerDomEvent(header, 'click', () => {
+		this.renderEvents.registerDomEvent(header, 'click', () => {
 			this.focusQueueCollapsed = !this.focusQueueCollapsed;
 			this.renderShell();
 		});
@@ -1901,7 +2172,7 @@ class TavernView extends ItemView {
 
 		for (const task of selectedTasks) {
 			const row = body.createDiv('tavern-focus-task');
-			this.registerDomEvent(row, 'contextmenu', (event) => {
+			this.renderEvents.registerDomEvent(row, 'contextmenu', (event) => {
 				void this.showTaskContextMenu(event, task);
 			});
 			this.applyTaskNesting(row, task);
@@ -1913,13 +2184,13 @@ class TavernView extends ItemView {
 				event.dataTransfer?.setData(QUEUE_KEY_MIME, taskSelectionKey(task));
 				this.setDailySource(event, task);
 			});
-			this.registerDomEvent(row, 'dragover', (event) => {
+			this.renderEvents.registerDomEvent(row, 'dragover', (event) => {
 				this.markReorderTarget(event, row);
 			});
-			this.registerDomEvent(row, 'dragleave', () => {
+			this.renderEvents.registerDomEvent(row, 'dragleave', () => {
 				this.clearReorderTarget(row);
 			});
-			this.registerDomEvent(row, 'drop', (event) => {
+			this.renderEvents.registerDomEvent(row, 'drop', (event) => {
 				event.preventDefault();
 				this.clearReorderTarget(row);
 				const sourceKey = event.dataTransfer?.getData(QUEUE_KEY_MIME) ?? '';
@@ -1930,7 +2201,7 @@ class TavernView extends ItemView {
 				type: 'checkbox',
 			});
 			checkbox.checked = task.checked;
-			this.registerDomEvent(checkbox, 'change', () => {
+			this.renderEvents.registerDomEvent(checkbox, 'change', () => {
 				if (checkbox.checked) {
 					void this.completeTask(task);
 				}
@@ -1944,7 +2215,7 @@ class TavernView extends ItemView {
 			});
 			setIcon(removeButton, 'x');
 			removeButton.createSpan({ cls: 'tavern-queue-toggle-label', text: 'Remove' });
-			this.registerDomEvent(removeButton, 'click', () => {
+			this.renderEvents.registerDomEvent(removeButton, 'click', () => {
 				void this.removeTaskSelection(task);
 			});
 		}
@@ -2085,12 +2356,27 @@ class TavernView extends ItemView {
 	}
 
 	private boardModel() {
-		return createProjectBoardModel({
+		const cached = this.boardCache;
+		if (
+			cached?.library === this.library &&
+			cached.keys === this.deps.settings.boardTaskKeys &&
+			cached.path === this.selectedPath
+		) {
+			return cached.model;
+		}
+		const model = createProjectBoardModel({
 			boardTaskKeys: this.deps.settings.boardTaskKeys,
 			library: this.library,
 			query: '',
 			selectedPath: this.selectedPath,
 		});
+		this.boardCache = {
+			library: this.library,
+			keys: this.deps.settings.boardTaskKeys,
+			path: this.selectedPath,
+			model,
+		};
+		return model;
 	}
 
 	private createResizeHandle(
@@ -2115,7 +2401,7 @@ class TavernView extends ItemView {
 			container.style.setProperty(config.cssVar, `${width}px`);
 		};
 
-		this.registerDomEvent(handle, 'mousedown', (event: MouseEvent) => {
+		this.renderEvents.registerDomEvent(handle, 'mousedown', (event: MouseEvent) => {
 			event.preventDefault();
 			this.dragCleanup?.();
 			startX = event.clientX;

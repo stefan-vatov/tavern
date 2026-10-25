@@ -870,6 +870,23 @@
 	overflow-x: visible;
 }
 
+.tavern-search-results {
+	scrollbar-gutter: stable;
+	transition: opacity 120ms var(--tavern-ease-out);
+}
+.tavern-search-results.is-pending {
+	opacity: 0.88;
+	pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+	.tavern-search-results {
+		transition-duration: 100ms;
+	}
+	.tavern-search-results.is-pending {
+		opacity: 0.96;
+	}
+}
+
 .tavern-container .tavern-sidebar-toggle {
 	display: none;
 	width: 28px;

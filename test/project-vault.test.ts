@@ -1,6 +1,7 @@
+/* eslint-disable eslint/max-statements, eslint/no-magic-numbers */
 /* eslint-disable eslint/func-style, eslint/max-statements */
 import { Effect } from 'effect';
-import { projectTasks } from '../src/project-library';
+import { createProjectLibraryBuilder, projectTasks } from '../src/project-library';
 import {
 	addVaultProjectTask,
 	completeVaultProjectTask,
@@ -55,6 +56,46 @@ describe('project vault adapter', () => {
 		const library = await Effect.runPromise(loadVaultProjectLibrary(vault, ['04_Projects']));
 
 		expect(library.projects.map((project) => project.path)).toEqual(['04_Projects/Pi.md']);
+	});
+
+	it('should read only configured folders using the same normalized path boundaries as discovery', async () => {
+		const { vault } = buildVault({
+			'  /04_Projects\\Nested\\Pi.md/  ': PROJECT_MARKDOWN,
+			'04_ProjectsElsewhere/Pi.md': PROJECT_MARKDOWN,
+			'Notes/Other.md': PROJECT_MARKDOWN,
+		});
+		const read = vi.spyOn(vault, 'read');
+		const library = await Effect.runPromise(loadVaultProjectLibrary(vault, [' /04_Projects/ ']));
+
+		expect(library.projects).toHaveLength(1);
+		expect(read.mock.calls.map(([file]) => file.path)).toEqual([
+			'  /04_Projects\\Nested\\Pi.md/  ',
+		]);
+	});
+
+	it('should refresh cached loads from current reads and retire unreadable notes', async () => {
+		const { files, vault } = buildVault({ '04_Projects/Pi.md': PROJECT_MARKDOWN });
+		const build = createProjectLibraryBuilder();
+		const load = () => Effect.runPromise(loadVaultProjectLibrary(vault, ['04_Projects'], build));
+		const first = await load();
+		expect(await load()).toBe(first);
+
+		const read = vi.spyOn(vault, 'read');
+		read.mockRejectedValueOnce(new Error('temporarily unreadable'));
+		expect((await load()).projects).toEqual([]);
+		const restored = await load();
+		expect(restored.projects[0]).not.toBe(first.projects[0]);
+		files['04_Projects/Pi.md'] = PROJECT_MARKDOWN.replace('Wire vault', 'Current vault text');
+		expect(projectTasks(await load())[0]?.text).toBe('Current vault text');
+
+		await Effect.runPromise(
+			editVaultProjectTask(
+				vault,
+				projectTasks(first).find((task) => task.text === 'Move me'),
+				'Edited current text',
+			),
+		);
+		expect(files['04_Projects/Pi.md']).toContain('Edited current text');
 	});
 
 	it('should complete a board task through vault modify', async () => {

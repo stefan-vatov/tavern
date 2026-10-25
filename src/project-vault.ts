@@ -15,6 +15,7 @@ import {
 } from './project-actions';
 import {
 	buildProjectLibrary,
+	isInsideAnyFolder,
 	type ProjectBoardTask,
 	type ProjectLibrary,
 	type ProjectSourceFile,
@@ -55,30 +56,33 @@ type VaultActionError = ProjectActionError | ProjectVaultError;
 const loadVaultProjectLibrary = (
 	vault: ProjectVault,
 	folders: string[],
+	builder: typeof buildProjectLibrary = buildProjectLibrary,
 ): Effect.Effect<ProjectLibrary, ProjectVaultError> =>
-	Effect.forEach(vault.getMarkdownFiles(), (file) =>
-		Effect.tryPromise({
-			catch: () =>
-				new ProjectVaultError({
-					message: 'Unable to read project file.',
+	Effect.forEach(
+		vault.getMarkdownFiles().filter((file) => isInsideAnyFolder(file.path, folders)),
+		(file) =>
+			Effect.tryPromise({
+				catch: () =>
+					new ProjectVaultError({
+						message: 'Unable to read project file.',
+						path: file.path,
+					}),
+				try: async () => ({
+					markdown: await vault.read(file),
 					path: file.path,
 				}),
-			try: async () => ({
-				markdown: await vault.read(file),
-				path: file.path,
-			}),
-		}).pipe(
-			/* eslint-disable eslint/no-console, promise/prefer-await-to-callbacks */
-			/* c8 ignore next -- degradation log for read errors (per-file graceful in load; action reads still fail hard) */
-			Effect.catchAll((error) => {
-				console.warn(`Tavern: failed to read file at ${file.path}:`, error);
-				return Effect.succeed(undefined);
-			}),
-			/* eslint-enable eslint/no-console, promise/prefer-await-to-callbacks */
-		),
+			}).pipe(
+				/* eslint-disable eslint/no-console, promise/prefer-await-to-callbacks */
+				/* c8 ignore next -- degradation log for read errors (per-file graceful in load; action reads still fail hard) */
+				Effect.catchAll((error) => {
+					console.warn(`Tavern: failed to read file at ${file.path}:`, error);
+					return Effect.succeed(undefined);
+				}),
+				/* eslint-enable eslint/no-console, promise/prefer-await-to-callbacks */
+			),
 	).pipe(
 		Effect.flatMap((files) =>
-			buildProjectLibrary({
+			builder({
 				files: files.filter((file): file is ProjectSourceFile => file !== undefined),
 				folders,
 			}),

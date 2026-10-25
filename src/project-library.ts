@@ -30,27 +30,68 @@ type ProjectBoardTask = ProjectTask & {
 	projectTitle: string;
 };
 
+const parseProjectSource = (file: ProjectSourceFile): Effect.Effect<ProjectSummary | undefined> =>
+	parseProjectNote(file.markdown).pipe(
+		Effect.map((note) => projectSummary(file.path, note)),
+		/* eslint-disable eslint/no-console, promise/prefer-await-to-callbacks */
+		/* c8 ignore next -- degradation log for parse errors on individual project notes */
+		Effect.catchAll((error) => {
+			console.warn(`Tavern: failed to parse project note at ${file.path}:`, error);
+			return Effect.succeed(undefined);
+		}),
+		/* eslint-enable eslint/no-console, promise/prefer-await-to-callbacks */
+	);
+
+const sortedProjects = (projects: (ProjectSummary | undefined)[]): ProjectSummary[] =>
+	projects
+		.filter((project): project is ProjectSummary => project !== undefined)
+		.sort((left, right) => left.title.localeCompare(right.title));
+
 const buildProjectLibrary = (input: ProjectLibraryInput): Effect.Effect<ProjectLibrary, never> =>
 	Effect.forEach(
 		input.files.filter((file) => isInsideAnyFolder(file.path, input.folders)),
-		(file) =>
-			parseProjectNote(file.markdown).pipe(
-				Effect.map((note) => projectSummary(file.path, note)),
-				/* eslint-disable eslint/no-console, promise/prefer-await-to-callbacks */
-				/* c8 ignore next -- degradation log for parse errors on individual project notes (graceful; covered by intent not unit branch) */
-				Effect.catchAll((error) => {
-					console.warn(`Tavern: failed to parse project note at ${file.path}:`, error);
-					return Effect.succeed(undefined);
+		parseProjectSource,
+	).pipe(Effect.map((projects) => ({ projects: sortedProjects(projects) })));
+
+const createProjectLibraryBuilder = (): typeof buildProjectLibrary => {
+	let cache = new Map<string, { markdown: string; project: ProjectSummary }>();
+	let library: ProjectLibrary | undefined = undefined;
+
+	return (input) =>
+		Effect.suspend(() => {
+			const nextCache = new Map<string, { markdown: string; project: ProjectSummary }>();
+			return Effect.forEach(
+				input.files.filter((file) => isInsideAnyFolder(file.path, input.folders)),
+				(file) => {
+					const previous = cache.get(file.path);
+					const project =
+						previous?.markdown === file.markdown
+							? Effect.succeed(previous.project)
+							: parseProjectSource(file);
+					return project.pipe(
+						Effect.tap((summary) => {
+							if (summary) {
+								nextCache.set(file.path, { markdown: file.markdown, project: summary });
+							}
+						}),
+					);
+				},
+			).pipe(
+				Effect.map((projects) => {
+					cache = nextCache;
+					const sorted = sortedProjects(projects);
+					if (
+						!library ||
+						sorted.length !== library.projects.length ||
+						sorted.some((project, index) => project !== library?.projects[index])
+					) {
+						library = { projects: sorted };
+					}
+					return library;
 				}),
-				/* eslint-enable eslint/no-console, promise/prefer-await-to-callbacks */
-			),
-	).pipe(
-		Effect.map((projects) => ({
-			projects: projects
-				.filter((project): project is ProjectSummary => project !== undefined)
-				.sort((left, right) => left.title.localeCompare(right.title)),
-		})),
-	);
+			);
+		});
+};
 
 const filterProjects = (library: ProjectLibrary, query: string): ProjectSummary[] => {
 	const normalizedQuery = normalizeSearch(query);
@@ -283,8 +324,10 @@ const normalizeSearch = (value: string): string =>
 
 export {
 	buildProjectLibrary,
+	createProjectLibraryBuilder,
 	filterProjects,
 	filterTasks,
+	isInsideAnyFolder,
 	projectTasks,
 	selectedProjectTasks,
 	taskSelectionKey,
