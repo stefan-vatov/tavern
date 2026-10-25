@@ -1,3 +1,10 @@
+## [1.7.2](https://github.com/stefan-vatov/tavern/compare/1.7.1...1.7.2) (2026-10-25)
+
+### Bug Fixes
+
+- keep task capture inputs available and hide log notes ([cd3b94b](https://github.com/stefan-vatov/tavern/commit/cd3b94b6880ae7f7a494853946e472dc89de37ec))
+- preserve task filter focus during capture saves ([3275980](https://github.com/stefan-vatov/tavern/commit/3275980e01817a506ad71c7012d120ba84df9eca))
+
 ## [1.7.1](https://github.com/stefan-vatov/tavern/compare/1.7.0...1.7.1) (2026-10-25)
 
 ### Bug Fixes
