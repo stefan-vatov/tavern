@@ -1,3 +1,13 @@
+# [1.9.0](https://github.com/stefan-vatov/tavern/compare/1.8.0...1.9.0) (2026-10-25)
+
+### Bug Fixes
+
+- keep captured daily tasks outside hidden notes ([ef69eba](https://github.com/stefan-vatov/tavern/commit/ef69ebae85c76f863db1f6a267d03dfc545f9864))
+
+### Features
+
+- send project task trees to captain's log ([bdbe071](https://github.com/stefan-vatov/tavern/commit/bdbe071167771d8e98558f0ca64718bbf920b13d))
+
 # [1.8.0](https://github.com/stefan-vatov/tavern/compare/1.7.2...1.8.0) (2026-10-25)
 
 ### Bug Fixes

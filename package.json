@@ -1,6 +1,6 @@
 {
 	"name": "tavern",
-	"version": "1.8.0",
+	"version": "1.9.0",
 	"description": "A local-first Obsidian plugin for iterative Tavern workflows.",
 	"keywords": [
 		"obsidian",
