@@ -1,3 +1,9 @@
+# [1.6.0](https://github.com/stefan-vatov/tavern/compare/1.5.0...1.6.0) (2026-10-25)
+
+### Features
+
+- synchronize linked task trees and add deletion menus ([56892ab](https://github.com/stefan-vatov/tavern/commit/56892aba294870d561cff5f4b2ee5c4ee980b08b))
+
 # [1.5.0](https://github.com/stefan-vatov/tavern/compare/1.4.3...1.5.0) (2026-10-24)
 
 ### Features
