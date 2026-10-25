@@ -1,3 +1,9 @@
+## [1.9.1](https://github.com/stefan-vatov/tavern/compare/1.9.0...1.9.1) (2026-10-25)
+
+### Bug Fixes
+
+- soften task and navigation hover feedback ([da3da05](https://github.com/stefan-vatov/tavern/commit/da3da05cbfe3f79af794477dc4352b62da365606))
+
 # [1.9.0](https://github.com/stefan-vatov/tavern/compare/1.8.0...1.9.0) (2026-10-25)
 
 ### Bug Fixes
