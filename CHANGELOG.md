@@ -1,3 +1,9 @@
+## [1.6.1](https://github.com/stefan-vatov/tavern/compare/1.6.0...1.6.1) (2026-10-25)
+
+### Bug Fixes
+
+- create daily logs with templater templates ([f411f03](https://github.com/stefan-vatov/tavern/commit/f411f03bd69a9c548617f54a01392ef44df4165f))
+
 # [1.6.0](https://github.com/stefan-vatov/tavern/compare/1.5.0...1.6.0) (2026-10-25)
 
 ### Features
