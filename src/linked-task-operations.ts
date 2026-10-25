@@ -596,6 +596,14 @@ class LinkedTaskOperations {
 			line: root.line,
 			markdown: lines.map((line) => line.raw).join('\n'),
 		}));
+		if (trees.length) {
+			for (const placeholder of destination
+				.tasks()
+				.filter((task) => task.line.raw === '- [ ] Task')) {
+				destination.delete(placeholder.line, 'task');
+			}
+		}
+
 		for (const tree of trees) {
 			destination.insertTree(tree.markdown);
 		}

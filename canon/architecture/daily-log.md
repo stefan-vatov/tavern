@@ -81,6 +81,12 @@ searches of older notes. Reading a note or invoking creation for an existing
 destination must not carry work again. This action introduces no task dates,
 scheduled creation, or recurrence.
 
+If at least one tree carries forward, remove parsed destination-template task
+rows whose raw text is exactly `- [ ] Task` before inserting carried trees.
+Keep the placeholder when no tree moves. Carried tasks with that text, checked
+or identified tasks, other template content, and fenced examples are preserved.
+Placeholder removal participates in the same transfer rollback as other note edits.
+
 Carry-forward relocates daily representations; project tasks and other linked
 copies stay in place. Update the moved endpoint's path, retaining its block ID
 and source/copy role so all existing linked operations still reach it. Validate

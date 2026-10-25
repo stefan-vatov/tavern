@@ -93,7 +93,8 @@ than creating another note or undoing the script's changes.
 After the template finishes, creating a new log moves unfinished work from the
 previous calendar day's log into its `Plan` section. A whole task tree moves if
 any task in it is incomplete, including completed items within that tree. Fully
-completed trees stay in the previous note. Task text, nested details, block IDs,
+completed trees stay in the previous note. When any tree carries forward, Tavern
+removes the new template’s exact `- [ ] Task` placeholder; otherwise it keeps it. Task text, nested details, block IDs,
 and links to projects and other copies stay intact; the moved tasks leave the
 previous log. If that exact previous day has no note, Tavern does not search
 older notes. Opening or creating an already existing log does not carry work again.

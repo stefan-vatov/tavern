@@ -1419,6 +1419,27 @@ describe('daily creation carry-forward', () => {
 		expect(state.links()).toEqual([]);
 	});
 
+	it.each([true, false])(
+		'removes only the new template placeholder when work carries over: %s',
+		async (carry) => {
+			const template =
+				'# New day\n### Plan\n- [ ] Task\n- [x] Task\n- [ ] Task ^intentional\n- [ ] Task details\n### Notes\n```md\n- [ ] Task\n```\n';
+			const state = await carryFixture(template);
+			const previous = carry
+				? '### Plan\n- [ ] Task\n  - [x] Existing detail ^detail\n'
+				: '### Plan\n- [x] Finished work\n';
+			state.vault.files.set(dailyPath, previous);
+			await state.service.create(nextDay);
+			let expected = template;
+			if (carry) {
+				expected =
+					'# New day\n### Plan\n- [x] Task\n- [ ] Task ^intentional\n- [ ] Task details\n- [ ] Task\n  - [x] Existing detail ^detail\n### Notes\n```md\n- [ ] Task\n```\n';
+			}
+			expect(state.vault.files.get(nextDailyPath)).toBe(expected);
+			expect(state.vault.files.get(dailyPath)).toBe(carry ? '### Plan\n' : previous);
+		},
+	);
+
 	it('relocates only selected daily source and copy endpoints and keeps edits and checking synchronized in both directions', async () => {
 		const state = await carryFixture();
 		const peerDay = '2026-10-20';
@@ -1608,7 +1629,8 @@ describe('daily creation carry-forward', () => {
 	it.each(['settings', 'destination write', 'previous write'] as const)(
 		'restores the template baseline and previous work after a failed %s',
 		async (failure) => {
-			const state = await carryFixture();
+			const template = carryTemplate.replace('- [ ] Template item ^template', '- [ ] Task');
+			const state = await carryFixture(template);
 			const previous = '### Plan\n- [ ] Linked work ^daily-copy\n';
 			state.vault.files.set(dailyPath, previous);
 			const links: DailyTaskLink[] = [
@@ -1630,7 +1652,7 @@ describe('daily creation carry-forward', () => {
 			await expect(state.service.create(nextDay)).rejects.toThrow(
 				failure === 'settings' ? 'Settings failed' : 'Disk write failed',
 			);
-			expect(state.vault.files).toEqual(new Map([...before, [nextDailyPath, carryTemplate]]));
+			expect(state.vault.files).toEqual(new Map([...before, [nextDailyPath, template]]));
 			expect(state.links()).toEqual(links);
 			if (failure === 'settings') {
 				expect(modify).not.toHaveBeenCalled();
