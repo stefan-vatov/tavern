@@ -104,6 +104,248 @@ const fixture = async () => {
 	};
 };
 
+describe('returning daily task trees to a project backlog', () => {
+	it.each(['Parent', 'Child'])(
+		'returns the entire standalone tree when selecting %s',
+		async (selected) => {
+			const state = await fixture();
+			state.vault.files.set(
+				dailyPath,
+				'### Plan\r\n- [X] Parent ^parent\r\n  details **kept**\r\n  - [ ] Child ^child\r\n    > support\r\n  parent continuation\r\n\r\n  - [x] Another child ^another\r\n- [ ] Unrelated\r\n### Notes\r\nKeep this.\r\n',
+			);
+			state.vault.files.set(
+				sourcePath,
+				'---\r\ntavern: project\r\n---\r\n# Project\r\n## Work\r\n- [ ] Work\r\n## Notes & Decisions\r\nProject notes.\r\n- [ ] Queued\r\n',
+			);
+			const task = parseDailyNote(state.vault.files.get(dailyPath)!).tasks.find(
+				(candidate) => candidate.text === selected,
+			)!;
+			const queued = state.tasks()[1]!;
+			state.focus([`${sourcePath}::${queued.id}`]);
+			const modify = vi.spyOn(state.vault, 'modify');
+			const mapping = await state.service.returnTaskToBacklog(day, task.id, sourcePath);
+			expect(state.vault.files.get(sourcePath)).toBe(
+				'---\r\ntavern: project\r\n---\r\n# Project\r\n## Work\r\n- [ ] Work\r\n## Backlog\r\n\r\n- [X] Parent ^parent\r\n  details **kept**\r\n  - [ ] Child ^child\r\n    > support\r\n  parent continuation\r\n\r\n  - [x] Another child ^another\r\n## Notes & Decisions\r\nProject notes.\r\n- [ ] Queued\r\n',
+			);
+			expect(state.vault.files.get(dailyPath)).toBe(
+				'### Plan\r\n- [ ] Unrelated\r\n### Notes\r\nKeep this.\r\n',
+			);
+			expect(mapping.get(task.id)).toBe('');
+			const movedQueueTask = state.tasks().find((candidate) => candidate.text === 'Queued')!;
+			expect(movedQueueTask.id).not.toBe(queued.id);
+			expect(state.focused()).toEqual([`${sourcePath}::${movedQueueTask.id}`]);
+			expect(modify.mock.calls.map(([file]) => file.path)).toEqual([sourcePath, dailyPath]);
+		},
+	);
+
+	it('keeps every existing counterpart in its current section, even with multiple copies', async () => {
+		const state = await fixture();
+		const project =
+			'---\ntavern: project\n---\n## Work\n- [ ] Existing ^one\n## Done\n- [x] Second ^two\n';
+		state.vault.files.set(sourcePath, project);
+		state.vault.files.set(dailyPath, '### Plan\n- [ ] Daily ^daily\n');
+		await state.options.saveLinks([
+			{
+				source: { path: dailyPath, blockId: 'daily' },
+				copies: [
+					{ path: sourcePath, blockId: 'one' },
+					{ path: sourcePath, blockId: 'two' },
+				],
+				checked: false,
+			},
+		]);
+		await state.service.returnTaskToBacklog(day, 'block:daily', sourcePath);
+		expect(state.vault.files.get(sourcePath)).toBe(project);
+		expect(state.vault.files.get(dailyPath)).toBe('### Plan\n');
+		expect(state.links()).toEqual([
+			{
+				source: { path: sourcePath, blockId: 'one' },
+				copies: [{ path: sourcePath, blockId: 'two' }],
+				checked: false,
+			},
+		]);
+	});
+
+	it('merges missing descendants under the existing parent and preserves other linked notes', async () => {
+		const state = await fixture();
+		const other = '04_Projects/Other.md';
+		state.vault.files.set(
+			sourcePath,
+			'---\ntavern: project\n---\n## Work\n- [ ] Parent ^project-parent\n  - [x] Existing child ^project-child\n',
+		);
+		state.vault.files.set(
+			other,
+			'---\ntavern: project\n---\n## Work\n- [ ] Parent ^other-parent\n  - [x] Existing child ^other-child\n',
+		);
+		state.vault.files.set(
+			dailyPath,
+			'### Plan\n- [ ] Parent ^daily-parent\n  - [x] Existing child ^daily-child\n  - [ ] Added\n    note kept\n    - [ ] Nested\n    parent continuation\n\n    - [x] Next nested\n',
+		);
+		await state.options.saveLinks([
+			{
+				source: { path: dailyPath, blockId: 'daily-parent' },
+				copies: [
+					{ path: sourcePath, blockId: 'project-parent' },
+					{ path: other, blockId: 'other-parent' },
+				],
+				checked: false,
+			},
+			{
+				source: { path: other, blockId: 'other-child' },
+				copies: [
+					{ path: sourcePath, blockId: 'project-child' },
+					{ path: dailyPath, blockId: 'daily-child' },
+				],
+				checked: true,
+			},
+		]);
+		await state.service.returnTaskToBacklog(day, 'block:daily-child', sourcePath);
+		for (const path of [sourcePath, other]) {
+			const { tasks } = parseDailyNote(state.vault.files.get(path)!);
+			expect(tasks.map((task) => [task.text, task.indent, task.checked])).toEqual([
+				['Parent', '', false],
+				['Existing child', '  ', true],
+				['Added', '  ', false],
+				['Nested', '    ', false],
+				['Next nested', '    ', true],
+			]);
+			expect(state.vault.files.get(path)!.replace(/ \^[A-Za-z0-9-]+/g, '')).toContain(
+				'  - [ ] Added\n    note kept\n    - [ ] Nested\n    parent continuation\n\n    - [x] Next nested\n',
+			);
+			expect(state.vault.files.get(path)).not.toContain('Backlog');
+		}
+		expect(
+			state
+				.links()
+				.flatMap((link) => [link.source, ...link.copies])
+				.some((endpoint) => endpoint.path === dailyPath),
+		).toBe(false);
+		const added = parseDailyNote(state.vault.files.get(sourcePath)!).tasks.find(
+			(task) => task.text === 'Added',
+		)!;
+		await state.service.editProjectTaskPlan(
+			{
+				...state.tasks().find((task) => task.blockId === added.blockId)!,
+				projectPath: sourcePath,
+				projectTitle: 'Project',
+			},
+			{ text: 'Edited addition', children: [], siblings: [] },
+		);
+		expect(state.vault.files.get(other)).toContain('Edited addition');
+	});
+
+	it.each([
+		'missing project',
+		'invalid project',
+		'missing endpoint',
+		'ambiguous endpoint',
+		'ambiguous parent',
+		'block collision',
+	])('retains the daily tree without writes on %s', async (failure) => {
+		const state = await fixture();
+		state.vault.files.set(
+			dailyPath,
+			'### Plan\n- [ ] Parent ^daily-parent\n  - [ ] Child ^daily-child\n',
+		);
+		state.vault.files.set(
+			sourcePath,
+			'---\ntavern: project\n---\n## Work\n- [ ] Parent ^project-parent\n',
+		);
+		const links: DailyTaskLink[] = [
+			{
+				source: { path: sourcePath, blockId: 'project-parent' },
+				copies: [{ path: dailyPath, blockId: 'daily-parent' }],
+				checked: false,
+			},
+		];
+		if (failure === 'missing project') {
+			state.vault.files.delete(sourcePath);
+		}
+		if (failure === 'invalid project') {
+			state.vault.files.set(sourcePath, '## Work\n- [ ] Parent ^project-parent\n');
+		}
+		if (failure === 'missing endpoint') {
+			links[0]!.source.blockId = 'missing';
+		}
+		if (failure === 'ambiguous endpoint') {
+			state.vault.files.set(
+				sourcePath,
+				`${state.vault.files.get(sourcePath)!}- [ ] Duplicate ^project-parent\n`,
+			);
+		}
+		if (failure === 'ambiguous parent') {
+			links[0]!.source = { path: dailyPath, blockId: 'daily-parent' };
+			links[0]!.copies = [
+				{ path: sourcePath, blockId: 'project-parent' },
+				{ path: sourcePath, blockId: 'another' },
+			];
+			state.vault.files.set(
+				sourcePath,
+				`${state.vault.files.get(sourcePath)!}- [ ] Another ^another\n`,
+			);
+		}
+		if (failure === 'block collision') {
+			state.vault.files.set(
+				sourcePath,
+				`${state.vault.files.get(sourcePath)!}- [ ] Unrelated ^daily-child\n`,
+			);
+		}
+		await state.options.saveLinks(links);
+		const before = new Map(state.vault.files);
+		const modify = vi.spyOn(state.vault, 'modify');
+		await expect(
+			state.service.returnTaskToBacklog(day, 'block:daily-parent', sourcePath),
+		).rejects.toThrow();
+		expect(state.vault.files).toEqual(before);
+		expect(state.links()).toEqual(links);
+		expect(modify).not.toHaveBeenCalled();
+	});
+
+	it.each(['settings', 'queue', 'destination', 'source'])(
+		'rolls back the relocation on %s failure',
+		async (failure) => {
+			const state = await fixture();
+			state.vault.files.set(dailyPath, '### Plan\n- [ ] Parent ^daily-parent\n');
+			const other = 'Daily/2026/10/2026-10-23.md';
+			state.vault.files.set(other, '### Plan\n- [ ] Other ^other\n');
+			const links: DailyTaskLink[] = [
+				{
+					source: { path: dailyPath, blockId: 'daily-parent' },
+					copies: [{ path: other, blockId: 'other' }],
+					checked: false,
+				},
+			];
+			await state.options.saveLinks(links);
+			state.focus([`${sourcePath}::${state.tasks()[2]!.id}`]);
+			const focused = state.focused();
+			const before = new Map(state.vault.files);
+			const modify = vi.spyOn(state.vault, 'modify');
+			if (failure === 'settings') {
+				vi.spyOn(state.options, 'saveLinks').mockRejectedValueOnce(new Error('Settings failed.'));
+			}
+			if (failure === 'queue') {
+				vi.spyOn(state.options, 'remapTaskKeys').mockRejectedValueOnce(new Error('Queue failed.'));
+			}
+			if (failure === 'destination' || failure === 'source') {
+				state.vault.failWritePath = failure === 'source' ? dailyPath : sourcePath;
+			}
+			await expect(
+				state.service.returnTaskToBacklog(day, 'block:daily-parent', sourcePath),
+			).rejects.toThrow();
+			expect(state.vault.files).toEqual(before);
+			expect(state.links()).toEqual(links);
+			expect(state.focused()).toEqual(focused);
+			const writes: Record<string, string[]> = {
+				settings: [],
+				queue: [],
+				destination: [sourcePath],
+				source: [sourcePath, dailyPath, sourcePath],
+			};
+			expect(modify.mock.calls.map(([file]) => file.path)).toEqual(writes[failure]);
+		},
+	);
+});
+
 describe('linked daily log tasks', () => {
 	it('delivers cross-note reference changes before a mirrored save resolves so a pending daily drag stays valid', async () => {
 		const state = await fixture();

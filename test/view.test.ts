@@ -324,6 +324,7 @@ class FakeDocument {
 const fakeDocument = new FakeDocument();
 
 type FakeMenuItem = {
+	disabled: boolean;
 	callback: (() => void) | undefined;
 	icon: string;
 	title: string;
@@ -376,6 +377,12 @@ const triggerScopeKey = (scope: unknown, key: string, event: Partial<KeyboardEve
 };
 
 class FakeMenuItemApi implements FakeMenuItem {
+	disabled = false;
+
+	setDisabled(disabled: boolean): this {
+		this.disabled = disabled;
+		return this;
+	}
 	callback: (() => void) | undefined = undefined;
 	icon = '';
 	title = '';
@@ -578,6 +585,7 @@ const createDailyController = (markdown: string | null = DAILY_MARKDOWN) => ({
 	addTaskPlan: vi.fn(async () => {}),
 	editTaskPlan: vi.fn(async () => {}),
 	deleteTask: vi.fn(async () => {}),
+	returnTaskToBacklog: vi.fn(async () => new Map<string, string>()),
 	setTaskChecked: vi.fn(async () => {}),
 	moveTask: vi.fn(async () => {}),
 	copyProjectTask: vi.fn(async () => {}),
@@ -3768,6 +3776,61 @@ tavern: project
 		expect(settings.boardTaskKeys).toEqual([validSourceKey]);
 	});
 	describe('Captain’s Log in the app shell', () => {
+		it.each(['project', 'global'] as const)(
+			'offers To Backlog for a daily child with the opposite pane showing %s',
+			async (boardPage) => {
+				const controller = createDailyController();
+				const view = dailyView(controller);
+				await view.setState({ boardPage, selectedPath: '04_Projects/Pi.md' }, { history: false });
+				const root = rootElements.at(-1)!;
+				await vi.waitFor(() => expect(findByAriaLabel(root, 'Edit Follow up')).toBeDefined());
+				findByAriaLabel(root, 'Edit Follow up')!.parent!.parent!.dispatch('contextmenu');
+				await vi.waitFor(() => expect(showMenuMock).toHaveBeenCalled());
+				const action = menuItems.find((item) => item.title === 'To Backlog');
+				expect(action).toBeDefined();
+				expect(action!.disabled).toBe(boardPage === 'global');
+				action!.callback!();
+				if (boardPage === 'project') {
+					await vi.waitFor(() =>
+						expect(controller.returnTaskToBacklog).toHaveBeenCalledExactlyOnceWith(
+							'2026-10-24',
+							'block:follow',
+							'04_Projects/Pi.md',
+						),
+					);
+				} else {
+					await vi.waitFor(() => expect(findByClass(root, 'tavern-daily-error')).toBeDefined());
+					expect(controller.returnTaskToBacklog).not.toHaveBeenCalled();
+				}
+				await view.onClose();
+			},
+		);
+
+		it('rejects To Backlog if the destination project changes after opening the menu', async () => {
+			const controller = createDailyController();
+			const view = dailyView(controller);
+			await view.setState(
+				{ boardPage: 'project', selectedPath: '04_Projects/Pi.md' },
+				{ history: false },
+			);
+			const root = rootElements.at(-1)!;
+			await vi.waitFor(() => expect(findByAriaLabel(root, 'Edit Review log')).toBeDefined());
+			findByAriaLabel(root, 'Edit Review log')!.parent!.parent!.dispatch('contextmenu');
+			await vi.waitFor(() => expect(showMenuMock).toHaveBeenCalled());
+			const action = menuItems.find((item) => item.title === 'To Backlog')!;
+			expect(action.disabled).toBe(false);
+			await view.setState({ boardPage: 'global' }, { history: false });
+			action.callback!();
+			await vi.waitFor(() =>
+				expect(findByClass(root, 'tavern-daily-error')?.text).toBe(
+					'Select the project and reopen the task menu to use To Backlog.',
+				),
+			);
+			expect(controller.returnTaskToBacklog).not.toHaveBeenCalled();
+			expect(findByAriaLabel(root, 'Edit Review log')).toBeDefined();
+			await view.onClose();
+		});
+
 		it.each([
 			{
 				action: 'Delete item',
@@ -3818,7 +3881,7 @@ tavern: project
 				);
 				findByAriaLabel(root, 'Mark Next task complete')!.parent!.dispatch('contextmenu');
 				await vi.waitFor(() => expect(menuItems.length).toBeGreaterThan(0));
-				expect(menuItems.map((item) => item.title)).toEqual(['Delete item']);
+				expect(menuItems.map((item) => item.title)).toEqual(['To Backlog', 'Delete item']);
 				menuItems.length = 0;
 				const filter = findByAriaLabel(root, 'Search log')!;
 				filter.value = 'Parent';
@@ -3833,7 +3896,11 @@ tavern: project
 				draft.value = 'Fresh child';
 				row.dispatch('contextmenu');
 				await vi.waitFor(() => expect(menuItems.length).toBeGreaterThan(0));
-				expect(menuItems.map((item) => item.title)).toEqual(['Delete item', 'Delete tree']);
+				expect(menuItems.map((item) => item.title)).toEqual([
+					'To Backlog',
+					'Delete item',
+					'Delete tree',
+				]);
 				menuItems.find((item) => item.title === action)!.callback!();
 				await vi.waitFor(() =>
 					expect(parseDailyNote(files[path]!).tasks.map((task) => task.text)).toEqual(remaining),

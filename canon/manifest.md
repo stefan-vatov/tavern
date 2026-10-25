@@ -14,6 +14,7 @@ status: reference
 - [One Tavern app decision](decisions/2026-09-22-one-tavern-app.md) — read for the human decision to keep Tavern and its views in one app window.
 - [Persistence](architecture/persistence.md) — read when changing note writes, saved queue state, task identity, or handling vault failures.
 - [Daily log](architecture/daily-log.md) — read when changing split-view daily notes, daily task copies, linked task identity, or completion synchronization.
+- [Return to Backlog decision](decisions/2026-10-25-return-to-backlog.md) — read for the human requirement to return daily trees to the displayed project and merge missing descendants without moving existing project items.
 - [Daily carry-forward decision](decisions/2026-10-25-daily-carry-forward.md) — read for the human requirement to move previous-day incomplete work on creation and retain whole mixed task trees.
 - [Daily template decision](decisions/2026-10-25-daily-log-template.md) — read for the human choices of a Tavern template-file setting and stopping on Templater failure.
 - [Linked task operations decision](decisions/2026-10-25-linked-task-operations.md) — read for the human requirement that all Tavern item operations and tree additions synchronize, creating missing destinations.

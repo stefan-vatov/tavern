@@ -66,6 +66,11 @@ interface DailyLogController {
 		taskId: string,
 		mode: TaskDeleteMode,
 	): Promise<Map<string, string> | void>;
+	returnTaskToBacklog(
+		day: string,
+		taskId: string,
+		projectPath: string,
+	): Promise<Map<string, string>>;
 	editTask(day: string, taskId: string, text: string): Promise<Map<string, string> | void>;
 	setTaskChecked(
 		day: string,

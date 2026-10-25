@@ -17,6 +17,7 @@ interface DailyLogPaneOptions {
 	onStateChange(state: { day: string; query: string }): void;
 	onChanged(): Promise<void>;
 	isEditing(): boolean;
+	backlogProjectPath(): string | undefined;
 	finishEditing(): Promise<void>;
 	bindCapture(
 		row: HTMLElement,
@@ -383,6 +384,32 @@ class DailyLogPane extends Component {
 		}
 		const hasChildren = taskHasChildren(snapshot.note.markdown, current.lineIndex);
 		const menu = new Menu();
+		const projectPath = this.options.backlogProjectPath();
+		menu.addItem((item) => {
+			item
+				.setTitle('To Backlog')
+				.setIcon('inbox')
+				.setDisabled(!projectPath)
+				.onClick(
+					() =>
+						void this.mutate(async () => {
+							if (!projectPath || this.options.backlogProjectPath() !== projectPath) {
+								throw new Error('Select the project and reopen the task menu to use To Backlog.');
+							}
+							if (this.day !== target.day) {
+								throw new Error('The selected day changed. Reopen the task menu.');
+							}
+							if (target.id) {
+								const mapping = await this.controller.returnTaskToBacklog(
+									target.day,
+									target.id,
+									projectPath,
+								);
+								this.remapTaskReferences(target.day, mapping);
+							}
+						}, [target]),
+				);
+		});
 		addTaskDeleteItems(menu, hasChildren, (mode) =>
 			this.mutate(async () => {
 				if (target.id) {

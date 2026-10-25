@@ -392,6 +392,12 @@ class TavernView extends ItemView {
 					return this.taskFromSelectionKey(key);
 				},
 				isEditing: () => this.hasInlineEditors(),
+				backlogProjectPath: () => {
+					if (this.boardPage === 'project') {
+						return this.selectedProject()?.path;
+					}
+					return undefined;
+				},
 				finishEditing: async () => {
 					await this.finishTaskEditing();
 					await this.taskMutationQueue;

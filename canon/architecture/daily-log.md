@@ -14,6 +14,7 @@ validation:
   - test/view.test.ts
 related:
   - ../decisions/2026-10-25-daily-carry-forward.md
+  - ../decisions/2026-10-25-return-to-backlog.md
   - ../decisions/2026-10-25-daily-log-template.md
   - ./persistence.md
   - ./project-workflow.md
@@ -106,6 +107,38 @@ changes. The newly rendered template note remains the destination baseline;
 arbitrary template side effects are not rolled back. No automatic retry into an
 existing note or new recovery policy for external concurrent edits is established.
 
+## Return from daily log to a project
+
+Daily task menus offer **To Backlog**, disabled unless the opposite pane shows
+a selected project. Choosing any member of a daily task tree returns its whole
+top-level tree, including checked descendants and supporting Markdown. Resolve
+the tree from the current note, including tasks hidden by filters.
+
+Registered counterparts already in the displayed project keep their current
+sections and placement; do not duplicate them or force them into Backlog. If
+only part of the tree exists there, merge missing tasks under their existing
+project parents. A wholly absent root and its missing tree go into `Backlog`,
+creating that section when necessary. Existing identities, rather than matching
+text, establish whether a task is already represented. Missing or ambiguous
+registered endpoints and ambiguous merge destinations are visible failures.
+
+Remove the returned tree only from the selected daily note. This is a transfer
+of representations, not Delete item or Delete tree: project tasks and other
+copies remain. Retarget or detach the daily endpoints while preserving surviving
+relationships; promote a surviving endpoint when the daily note held the source.
+New additions to linked trees retain the linked-unit synchronization contract.
+Transferred tasks retain text, checkbox states, nesting, and supporting content;
+existing project content stays intact. Preserve note line endings, unrelated
+content, and queue references to surviving project tasks.
+
+The destination project is bound when the menu opens. If the opposite pane or
+selected day changes before execution, reject the stale action visibly rather
+than choosing another destination. Prepare the transfer using the linked-write
+contract below; write destination changes before removing daily work. Failed
+settings or queue-reference saves must precede note writes, and failed writes
+attempt to restore notes and references. Failures remain visible and must not
+silently discard the daily tree; rollback failures retain the limits below.
+
 ## Copies and stable references
 
 Dragging a task from the global or focus queue into the daily log copies its
@@ -124,7 +157,7 @@ remains usable without Tavern.
 
 ## Linked units and Tavern operations
 
-Every task operation performed in Tavern affects the source and every linked
+Task-content operations performed in Tavern affect the source and every linked
 copy. This includes text edits, checking and unchecking, item/tree deletion,
 adding subitems or nested groups, moving, nesting, and reordering. A standalone
 task is one unit; a parent and its task tree are also a unit. Additions inside a
@@ -145,6 +178,10 @@ Moving or reordering a parent carries its complete tree.
 Capturing a standalone task without a linked anchor does not invent peers in
 other notes. Queue selection and focus-queue ordering remain plugin-owned view
 state; removing a queue selection is distinct from deleting the task.
+
+The explicit return-to-backlog and carry-forward actions relocate daily
+representations under their transfer contracts above, rather than globally
+deleting their underlying tasks.
 
 ## Checkbox synchronization and failures
 

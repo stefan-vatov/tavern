@@ -114,6 +114,14 @@ Moving a parent carries its whole group. Tasks written directly in a daily note
 can be checked and unchecked without belonging to a project or queue. Checking a task keeps the log and unfinished
 entries in place while the queues update.
 
+Right-click a daily task and choose **To Backlog** to return its whole tree to
+the project shown in the opposite pane. Clicking a child returns the parent
+and its full tree too. Existing project tasks stay where they are; missing
+children merge under their project parents, and new trees go into **Backlog**.
+The daily tree is removed after the transfer succeeds. Other linked copies and
+checkbox states stay intact. The option is disabled while the other pane shows
+the global queue.
+
 Drag a task's handle from the global or focus queue into the daily log to copy
 it, including its nested tasks. Drag a parent to copy its whole group; nested
 queue tasks cannot be dragged into the log separately. The source stays in its project. Tavern adds

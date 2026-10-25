@@ -153,6 +153,17 @@ class DailyLogService implements DailyLogController {
 		);
 	}
 
+	returnTaskToBacklog(
+		day: string,
+		taskId: string,
+		projectPath: string,
+	): Promise<Map<string, string>> {
+		const reference = { path: this.store.path(day), id: taskId };
+		return this.enqueue(() =>
+			this.operation(reference, (engine) => engine.returnToBacklog(reference, projectPath)),
+		);
+	}
+
 	moveProjectTask(task: ProjectBoardTask, sectionName: string): Promise<Map<string, string>> {
 		const reference = projectReference(task);
 		return this.enqueue(() =>
