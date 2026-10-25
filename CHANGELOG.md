@@ -1,3 +1,13 @@
+# [1.8.0](https://github.com/stefan-vatov/tavern/compare/1.7.2...1.8.0) (2026-10-25)
+
+### Bug Fixes
+
+- merge backlog additions across every parent copy ([c1ce0c0](https://github.com/stefan-vatov/tavern/commit/c1ce0c01fcd226db96e062b06c03602034aa73b1))
+
+### Features
+
+- return daily task trees to project backlog ([224929a](https://github.com/stefan-vatov/tavern/commit/224929a173af2916578f03caa9275fbdf314466c))
+
 ## [1.7.2](https://github.com/stefan-vatov/tavern/compare/1.7.1...1.7.2) (2026-10-25)
 
 ### Bug Fixes
