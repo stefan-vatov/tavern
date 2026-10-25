@@ -83,6 +83,7 @@ interface DailyLogController {
 		target: DailyLogDropTarget,
 	): Promise<Map<string, string> | void>;
 	copyProjectTask(day: string, task: ProjectBoardTask, target?: DailyLogDropTarget): Promise<void>;
+	sendProjectTaskToLog(day: string, task: ProjectBoardTask): Promise<Map<string, string>>;
 }
 
 export type { DailyLogController, DailyLogDropTarget, DailyLogSnapshot };

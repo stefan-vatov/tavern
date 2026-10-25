@@ -232,6 +232,13 @@ class DailyLogService implements DailyLogController {
 		});
 	}
 
+	sendProjectTaskToLog(day: string, task: ProjectBoardTask): Promise<Map<string, string>> {
+		const reference = projectReference(task);
+		return this.enqueue(() =>
+			this.operation(reference, (engine) => engine.sendToLog(reference, this.store.path(day))),
+		);
+	}
+
 	private async operation(
 		reference: TaskReference,
 		prepare: (engine: LinkedTaskOperations) => Promise<void>,

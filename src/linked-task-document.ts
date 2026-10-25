@@ -206,16 +206,29 @@ class LinkedTaskDocument {
 	}
 
 	sectionIndex(name: string): number {
+		const visiblePlan = name === 'Plan' && !this.isProject;
 		const headings = parseDailyNote(this.markdown()).items.filter(
 			(item) => item.type === 'heading',
 		);
 		const heading = headings.find(
-			(item) => item.text === name && (!this.isProject || item.level === 2),
+			(item) =>
+				item.text === name &&
+				(!this.isProject || item.level === 2) &&
+				(!visiblePlan || !this.isHidden(this.lines[item.lineIndex]!)),
 		);
 		if (heading) {
 			let index =
 				headings.find((item) => item.lineIndex > heading.lineIndex && item.level <= heading.level)
 					?.lineIndex ?? this.lines.length;
+			if (visiblePlan) {
+				index =
+					headings.find(
+						(item) =>
+							item.lineIndex > heading.lineIndex &&
+							item.lineIndex < index &&
+							item.text.trim().toLowerCase() === 'notes',
+					)?.lineIndex ?? index;
+			}
 			while (index > heading.lineIndex + 1 && !this.lines[index - 1]!.raw.trim()) {
 				index -= 1;
 			}
@@ -224,11 +237,38 @@ class LinkedTaskDocument {
 		const index = this.isProject
 			? (headings.find((item) => item.text === 'Notes & Decisions')?.lineIndex ?? this.lines.length)
 			: this.lines.length;
+		const defaultLevel = this.isProject ? 2 : 3;
+		const level = visiblePlan
+			? Math.min(defaultLevel, this.hiddenNotesLevel(index) ?? defaultLevel)
+			: defaultLevel;
 		this.insert(index, [
-			{ raw: `${this.isProject ? '##' : '###'} ${name}`, ending: this.ending },
+			{ raw: `${'#'.repeat(level)} ${name}`, ending: this.ending },
 			{ raw: '', ending: this.ending },
 		]);
 		return index + 2;
+	}
+
+	isHidden(line: TaskLine): boolean {
+		return this.hiddenNotesLevel(this.lines.indexOf(line)) !== undefined;
+	}
+
+	private hiddenNotesLevel(index: number): number | undefined {
+		let hidden: number | undefined = undefined;
+		for (const item of parseDailyNote(this.markdown()).items) {
+			if (item.type !== 'heading') {
+				continue;
+			}
+			if (item.lineIndex > index) {
+				break;
+			}
+			if (hidden !== undefined && item.level <= hidden) {
+				hidden = undefined;
+			}
+			if (item.text.trim().toLowerCase() === 'notes') {
+				hidden ??= item.level;
+			}
+		}
+		return hidden;
 	}
 
 	move(line: TaskLine, target: TaskLine, placement: 'before' | 'after' | 'child'): void {

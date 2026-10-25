@@ -589,6 +589,7 @@ const createDailyController = (markdown: string | null = DAILY_MARKDOWN) => ({
 	setTaskChecked: vi.fn(async () => {}),
 	moveTask: vi.fn(async () => {}),
 	copyProjectTask: vi.fn(async () => {}),
+	sendProjectTaskToLog: vi.fn(async () => new Map<string, string>()),
 });
 
 const taskMutationView = async (surface: 'project' | 'daily') => {
@@ -1477,7 +1478,11 @@ tavern: project
 		await vi.waitFor(() => expect(menuItems.length).toBeGreaterThan(0));
 
 		expect(showMenuMock).toHaveBeenCalledTimes(1);
-		expect(menuItems.map((item) => item.title)).toEqual(['Delete item', 'Add to global queue']);
+		expect(menuItems.map((item) => item.title)).toEqual([
+			"To Captain's Log",
+			'Delete item',
+			'Add to global queue',
+		]);
 	});
 
 	it('should show queued state in the global search overlay', async () => {
@@ -2519,6 +2524,7 @@ tavern: project
 			row('Next task')!.dispatch('contextmenu');
 			await vi.waitFor(() => expect(menuItems.length).toBeGreaterThan(0));
 			expect(menuItems.map((item) => item.title)).toEqual([
+				"To Captain's Log",
 				'Delete item',
 				'Remove from global queue',
 			]);
@@ -2533,6 +2539,7 @@ tavern: project
 			row('Parent task')!.dispatch('contextmenu');
 			await vi.waitFor(() => expect(menuItems.length).toBeGreaterThan(0));
 			expect(menuItems.map((item) => item.title)).toEqual([
+				"To Captain's Log",
 				'Delete item',
 				'Delete tree',
 				'Remove from global queue',
@@ -3776,6 +3783,93 @@ tavern: project
 		expect(settings.boardTaskKeys).toEqual([validSourceKey]);
 	});
 	describe('Captain’s Log in the app shell', () => {
+		it.each(['project', 'global'] as const)(
+			'sends a child from the %s menu to the displayed historical log',
+			async (boardPage) => {
+				const controller = createDailyController();
+				const files = { '04_Projects/Pi.md': NESTED_MARKDOWN };
+				const vault = createVault(files);
+				const view = new TavernView({} as never, {
+					dailyLogs: controller,
+					vault,
+					saveSettings: vi.fn(),
+					settings: { boardTaskKeys: [], projectFolders: ['04_Projects'], tavernName: 'Tavern' },
+				});
+				await view.setState({ boardPage, selectedPath: '04_Projects/Pi.md' }, { history: false });
+				const root = rootElements.at(-1)!;
+				findByAriaLabel(root, 'Previous day')!.dispatch('click');
+				await vi.waitFor(() => expect(controller.read).toHaveBeenCalledWith('2026-10-23'));
+				findByAriaLabel(root, 'Complete Child task')!.parent!.dispatch('contextmenu');
+				await vi.waitFor(() => expect(showMenuMock).toHaveBeenCalled());
+				const action = menuItems.find((item) => item.title === "To Captain's Log");
+				expect(action).toBeDefined();
+				expect(action!.disabled).toBe(false);
+				action!.callback!();
+				await vi.waitFor(() =>
+					expect(controller.sendProjectTaskToLog).toHaveBeenCalledExactlyOnceWith(
+						'2026-10-23',
+						expect.objectContaining({ projectPath: '04_Projects/Pi.md', text: 'Child task' }),
+					),
+				);
+				expect(controller.create).not.toHaveBeenCalled();
+				expect(files['04_Projects/Pi.md']).toBe(NESTED_MARKDOWN);
+				await view.onClose();
+			},
+		);
+
+		it.each(['missing', 'unreadable'] as const)(
+			'disables sending to a %s daily note without creating one',
+			async (state) => {
+				const controller = createDailyController(null);
+				const view = dailyView(controller);
+				await view.setState(
+					{ boardPage: 'project', selectedPath: '04_Projects/Pi.md' },
+					{ history: false },
+				);
+				const root = rootElements.at(-1)!;
+				if (state === 'unreadable') {
+					controller.read.mockRejectedValue(new Error('Daily read failed.'));
+				}
+				findByAriaLabel(root, 'Complete Build board')!.parent!.dispatch('contextmenu');
+				await vi.waitFor(() => expect(showMenuMock).toHaveBeenCalled());
+				expect(menuItems.find((item) => item.title === "To Captain's Log")?.disabled).toBe(true);
+				expect(menuItems.find((item) => item.title === 'Delete item')).toBeDefined();
+				expect(controller.sendProjectTaskToLog).not.toHaveBeenCalled();
+				expect(controller.create).not.toHaveBeenCalled();
+				if (state === 'unreadable') {
+					const { Notice } = await import('obsidian');
+					expect(Notice).toHaveBeenCalledWith(
+						"Tavern could not read Captain's Log: Daily read failed.",
+					);
+				}
+				await view.onClose();
+			},
+		);
+
+		it('rejects a send when the displayed daily day changes after opening the menu', async () => {
+			const { Notice } = await import('obsidian');
+			const controller = createDailyController();
+			const view = dailyView(controller);
+			await view.setState(
+				{ boardPage: 'project', selectedPath: '04_Projects/Pi.md' },
+				{ history: false },
+			);
+			const root = rootElements.at(-1)!;
+			findByAriaLabel(root, 'Complete Build board')!.parent!.dispatch('contextmenu');
+			await vi.waitFor(() => expect(showMenuMock).toHaveBeenCalled());
+			const action = menuItems.find((item) => item.title === "To Captain's Log")!;
+			findByAriaLabel(root, 'Previous day')!.dispatch('click');
+			await vi.waitFor(() => expect(controller.read).toHaveBeenCalledWith('2026-10-23'));
+			action.callback!();
+			await vi.waitFor(() =>
+				expect(Notice).toHaveBeenCalledWith(
+					"Tavern could not send the task to Captain's Log: The selected day changed. Reopen the task menu to use To Captain's Log.",
+				),
+			);
+			expect(controller.sendProjectTaskToLog).not.toHaveBeenCalled();
+			await view.onClose();
+		});
+
 		it.each(['project', 'global'] as const)(
 			'offers To Backlog for a daily child with the opposite pane showing %s',
 			async (boardPage) => {

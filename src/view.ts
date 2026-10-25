@@ -1482,11 +1482,34 @@ class TavernView extends ItemView {
 		if (this.closed || this.contextMenuTask !== target || !target.id) {
 			return;
 		}
+		const day = this.dailyDay;
+		let logExists = false;
+		try {
+			logExists = Boolean(day && (await this.deps.dailyLogs?.read(day))?.note);
+		} catch (error) {
+			if (!this.closed && this.contextMenuTask === target && this.dailyDay === day) {
+				let message = String(error);
+				if (error instanceof Error) {
+					({ message } = error);
+				}
+				new Notice(`Tavern could not read Captain's Log: ${message}`);
+			}
+		}
+		if (this.closed || this.contextMenuTask !== target || this.dailyDay !== day || !target.id) {
+			return;
+		}
 		const current = this.findBoardTask(target.projectPath, target.id);
 		if (!current) {
 			return;
 		}
 		const menu = new Menu();
+		menu.addItem((item) => {
+			item
+				.setTitle("To Captain's Log")
+				.setIcon('notebook-pen')
+				.setDisabled(!logExists)
+				.onClick(() => void this.sendTaskToLog(target, day));
+		});
 		const project = this.library.projects.find(
 			(candidate) => candidate.path === target.projectPath,
 		);
@@ -1512,6 +1535,26 @@ class TavernView extends ItemView {
 			});
 		}
 		menu.showAtMouseEvent(event);
+	}
+
+	private sendTaskToLog(target: { projectPath: string; id: string }, day: string): Promise<void> {
+		return this.queueProjectMutation(
+			[target],
+			async () => {
+				if (!day || this.dailyDay !== day) {
+					throw new Error(
+						"The selected day changed. Reopen the task menu to use To Captain's Log.",
+					);
+				}
+				const task = this.findBoardTask(target.projectPath, target.id);
+				if (!task || !this.deps.dailyLogs) {
+					throw new Error('The project task is no longer available.');
+				}
+				const mapping = await this.deps.dailyLogs.sendProjectTaskToLog(day, task);
+				this.remapTaskReferences(target.projectPath, mapping);
+			},
+			{ prefix: "Tavern could not send the task to Captain's Log" },
+		);
 	}
 
 	private renderReorderButton(
@@ -1604,7 +1647,7 @@ class TavernView extends ItemView {
 	private queueProjectMutation(
 		tasks: { projectPath: string; id: string }[],
 		action: () => Promise<void>,
-		failureMessage: string,
+		failureMessage: string | { prefix: string },
 	): Promise<void> {
 		for (const task of tasks) {
 			this.pendingTaskReferences.add(task);
@@ -1616,8 +1659,16 @@ class TavernView extends ItemView {
 				await this.finishTaskEditing();
 				await this.deps.dailyLogs?.whenIdle?.();
 				await action();
-			} catch {
-				new Notice(failureMessage);
+			} catch (error) {
+				let message = failureMessage;
+				if (typeof message !== 'string') {
+					let detail = String(error);
+					if (error instanceof Error) {
+						detail = error.message;
+					}
+					message = `${message.prefix}: ${detail}`;
+				}
+				new Notice(message);
 			} finally {
 				for (const task of tasks) {
 					this.pendingTaskReferences.delete(task);

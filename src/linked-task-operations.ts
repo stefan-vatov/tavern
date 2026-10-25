@@ -621,39 +621,58 @@ class LinkedTaskOperations {
 		this.documents.set(previousPath, previous);
 	}
 
+	async sendToLog(reference: TaskReference, destinationPath: string): Promise<void> {
+		const origin = this.topLevel(await this.locate(reference));
+		const destination = await this.document(destinationPath);
+		if (!origin.document.isProject || origin.document === destination) {
+			throw new Error('The daily log source must be a different Tavern project note.');
+		}
+		await this.mergeRepresentation(origin, destination, 'Plan');
+	}
+
 	async returnToBacklog(reference: TaskReference, projectPath: string): Promise<void> {
-		const origin = await this.locate(reference);
+		const origin = this.topLevel(await this.locate(reference));
 		const project = await this.document(projectPath);
 		if (!project.isProject || project === origin.document) {
 			throw new Error('The backlog destination must be a different Tavern project note.');
 		}
-		let root = origin.document.at(origin.line);
-		let parent = origin.document.parent(root.line);
-		while (parent) {
-			root = parent;
-			parent = origin.document.parent(root.line);
-		}
-		const group = new Set(origin.document.group(root.line));
-		const tasks = origin.document.tasks().filter((task) => group.has(task.line));
-		for (const task of tasks) {
-			origin.document.locate(task.id);
-		}
-		await this.treeClosure([{ document: origin.document, line: root.line }], false);
-		for (const task of tasks) {
-			const link = this.link({ document: origin.document, line: task.line });
-			if (link && endpoints(link).some((endpoint) => endpoint.path === projectPath)) {
+		const lines = await this.mergeRepresentation(origin, project, 'Backlog');
+		const removedIds = new Set(lines.map((line) => origin.document.at(line).blockId));
+		for (const link of [...this.links]) {
+			const retained = endpoints(link).filter(
+				(endpoint) => endpoint.path !== reference.path || !removedIds.has(endpoint.blockId),
+			);
+			if (retained.length === endpoints(link).length) {
 				continue;
 			}
-			if (
-				task.blockId &&
-				project.lines.some(
-					(line) => line.raw.match(/(?:^|\s)\^([A-Za-z0-9-]+)\s*$/)?.[1] === task.blockId,
-				)
-			) {
-				throw new Error(`Backlog task block ^${task.blockId} already exists in the destination.`);
+			if (retained.length < 2) {
+				this.links.splice(this.links.indexOf(link), 1);
+				continue;
 			}
+			const source =
+				retained.find((endpoint) => sameEndpoint(endpoint, link.source)) ??
+				retained.find((endpoint) => endpoint.path === projectPath) ??
+				retained[0]!;
+			link.source = source;
+			link.copies = retained.filter((endpoint) => !sameEndpoint(endpoint, source));
 		}
+		origin.document.delete(origin.line, 'tree');
+		this.documents.delete(reference.path);
+		this.documents.set(reference.path, origin.document);
+	}
 
+	private topLevel(origin: LocatedReference): LocatedReference {
+		let { line } = origin;
+		let parent = origin.document.parent(line);
+		while (parent) {
+			({ line } = parent);
+			parent = origin.document.parent(line);
+		}
+		return { document: origin.document, line };
+	}
+
+	private async adoptTreeAdditions(origin: LocatedReference, lines: TaskLine[]): Promise<void> {
+		const tasks = origin.document.tasks().filter((task) => lines.includes(task.line));
 		// Adopt additions individually: copying a whole partial tree would duplicate its linked children.
 		for (const task of tasks) {
 			const child = { document: origin.document, line: task.line };
@@ -676,8 +695,9 @@ class LinkedTaskOperations {
 				if (counterpart.document === origin.document && counterpart.line === sourceParent!.line) {
 					continue;
 				}
-				const copied = await this.insertBacklogTask(child, counterpart.document, {
+				const copied = await this.insertRepresentation(child, counterpart.document, {
 					parent: counterpart.line,
+					section: 'Plan',
 					preserveIds: false,
 					tree,
 				});
@@ -705,95 +725,184 @@ class LinkedTaskOperations {
 				link.source = canonical;
 			}
 		}
+	}
 
+	private async mergeRepresentation(
+		origin: LocatedReference,
+		destination: LinkedTaskDocument,
+		section: 'Backlog' | 'Plan',
+	): Promise<TaskLine[]> {
+		const group = new Set(origin.document.group(origin.line));
+		const tasks = origin.document.tasks().filter((task) => group.has(task.line));
+		for (const task of tasks) {
+			origin.document.locate(task.id);
+		}
+		await this.treeClosure([origin], false);
+		if (section === 'Backlog') {
+			for (const task of tasks) {
+				const link = this.link({ document: origin.document, line: task.line });
+				if (link && endpoints(link).some((endpoint) => endpoint.path === destination.path)) {
+					continue;
+				}
+				if (
+					task.blockId &&
+					destination.lines.some(
+						(line) => line.raw.match(/(?:^|\s)\^([A-Za-z0-9-]+)\s*$/)?.[1] === task.blockId,
+					)
+				) {
+					throw new Error(`Backlog task block ^${task.blockId} already exists in the destination.`);
+				}
+			}
+		}
+		await this.adoptTreeAdditions(
+			origin,
+			tasks.map((task) => task.line),
+		);
 		const inserted = new Map<TaskLine, LocatedReference[]>();
+		const resolved = new Map<TaskLine, LocatedReference[]>();
+		const candidatesFor = async (line: TaskLine): Promise<LocatedReference[]> => {
+			const link = this.link({ document: origin.document, line });
+			const registered = link
+				? (await this.validate(link)).filter((candidate) => candidate.document === destination)
+				: [];
+			const all = [...registered, ...(inserted.get(line) ?? [])];
+			return all.filter(
+				(candidate, index) => all.findIndex((other) => other.line === candidate.line) === index,
+			);
+		};
 		const ensure = async (line: TaskLine): Promise<LocatedReference[]> => {
-			const cached = inserted.get(line);
+			const cached = resolved.get(line);
 			if (cached) {
 				return cached;
 			}
 			const source = { document: origin.document, line };
-			const link = this.link(source);
-			const candidates = link
-				? (await this.validate(link)).filter((candidate) => candidate.document === project)
-				: [];
-			if (candidates.length) {
-				return candidates;
-			}
-			const sourceParent = origin.document.parent(line);
-			const destinationParents =
-				sourceParent && group.has(sourceParent.line)
-					? await ensure(sourceParent.line)
-					: [undefined];
-			const copiedWithParent = inserted.get(line);
-			if (copiedWithParent) {
-				return copiedWithParent;
-			}
-			const sourceGroup = new Set(origin.document.group(line));
-			const tree = !tasks.some((task) => {
-				const taskLink = this.link({ document: origin.document, line: task.line });
-				return (
-					sourceGroup.has(task.line) &&
-					taskLink &&
-					endpoints(taskLink).some((endpoint) => endpoint.path === projectPath)
+			const parent = origin.document.parent(line);
+			const parents = parent && group.has(parent.line) ? await ensure(parent.line) : [];
+			const candidates = await candidatesFor(line);
+			if (section === 'Plan') {
+				const covered = new Set(
+					candidates
+						.filter((entry) => !destination.isHidden(entry.line))
+						.map((entry) => destination.parent(entry.line)?.line),
 				);
-			});
-			for (const [index, destinationParent] of destinationParents.entries()) {
-				const copied = await this.insertBacklogTask(source, project, {
-					parent: destinationParent?.line,
-					preserveIds: index === 0,
-					tree,
-				});
-				for (const task of tasks.filter((candidate) => copied.lines.has(candidate.line))) {
-					const counterpart = { document: project, line: copied.lines.get(task.line)! };
-					const related = inserted.get(task.line) ?? [];
-					related.push(counterpart);
-					inserted.set(task.line, related);
-					const taskLink = this.link({ document: origin.document, line: task.line });
-					if (taskLink) {
-						taskLink.copies.push(this.endpoint(counterpart));
+				for (const candidate of candidates) {
+					if (!destination.isHidden(candidate.line)) {
+						continue;
+					}
+					const target = parents.find((entry) => !covered.has(entry.line)) ?? parents[0];
+					if (target) {
+						await this.revealRepresentation(source, candidate, target.line);
+						covered.add(target.line);
+					} else {
+						destination.moveSection(candidate.line, 'Plan');
 					}
 				}
 			}
-			return inserted.get(line)!;
+			const contextual = candidates.filter((candidate) =>
+				parents.some((entry) => destination.parent(candidate.line)?.line === entry.line),
+			);
+			let missingParents: (LocatedReference | undefined)[] = candidates.length ? [] : [undefined];
+			if (parents.length) {
+				missingParents = parents.filter(
+					(entry) =>
+						!contextual.some(
+							(candidate) => destination.parent(candidate.line)?.line === entry.line,
+						),
+				);
+			}
+			// An existing visible representation in another section keeps its placement.
+			if (candidates.length && parents.length && !contextual.length) {
+				missingParents.length = 0;
+			}
+			const sourceGroup = new Set(origin.document.group(line));
+			for (const targetParent of missingParents) {
+				const context = targetParent ? new Set(destination.group(targetParent.line)) : undefined;
+				let tree = true;
+				for (const task of tasks.filter((entry) => sourceGroup.has(entry.line))) {
+					if (
+						(await candidatesFor(task.line)).some(
+							(candidate) => !context || context.has(candidate.line),
+						)
+					) {
+						tree = false;
+						break;
+					}
+				}
+				const preserveIds =
+					section === 'Backlog' &&
+					!tasks.some((task) => {
+						const id = origin.document.at(task.line).blockId;
+						return (
+							sourceGroup.has(task.line) &&
+							id &&
+							destination.lines.some(
+								(row) => row.raw.match(/(?:^|\s)\^([A-Za-z0-9-]+)\s*$/)?.[1] === id,
+							)
+						);
+					});
+				const copied = await this.insertRepresentation(source, destination, {
+					parent: targetParent?.line,
+					preserveIds,
+					tree,
+					section,
+				});
+				for (const task of tasks.filter((entry) => copied.lines.has(entry.line))) {
+					const counterpart = { document: destination, line: copied.lines.get(task.line)! };
+					const created = inserted.get(task.line) ?? [];
+					created.push(counterpart);
+					inserted.set(task.line, created);
+					const sourceTask = { document: origin.document, line: task.line };
+					let link = this.link(sourceTask);
+					if (!link && section === 'Plan') {
+						link = { source: this.endpoint(sourceTask), copies: [], checked: task.checked };
+						this.links.push(link);
+					}
+					if (link) {
+						link.copies.push(this.endpoint(counterpart));
+					}
+				}
+			}
+			const result = await candidatesFor(line);
+			resolved.set(line, result);
+			return result;
 		};
 		for (const task of tasks) {
-			const link = this.link({ document: origin.document, line: task.line });
-			if (!link || !endpoints(link).some((endpoint) => endpoint.path === projectPath)) {
-				await ensure(task.line);
-			}
+			await ensure(task.line);
 		}
-
-		const removedIds = new Set(tasks.map((task) => origin.document.at(task.line).blockId));
-		for (const link of [...this.links]) {
-			const retained = endpoints(link).filter(
-				(endpoint) => endpoint.path !== reference.path || !removedIds.has(endpoint.blockId),
-			);
-			if (retained.length === endpoints(link).length) {
-				continue;
-			}
-			if (retained.length < 2) {
-				this.links.splice(this.links.indexOf(link), 1);
-				continue;
-			}
-			const source =
-				retained.find((endpoint) => sameEndpoint(endpoint, link.source)) ??
-				retained.find((endpoint) => endpoint.path === projectPath) ??
-				retained[0]!;
-			link.source = source;
-			link.copies = retained.filter((endpoint) => !sameEndpoint(endpoint, source));
-		}
-		origin.document.delete(root.line, 'tree');
-		this.documents.delete(reference.path);
-		this.documents.set(reference.path, origin.document);
+		return tasks.map((task) => task.line);
 	}
 
-	private async insertBacklogTask(
+	private async revealRepresentation(
+		origin: LocatedReference,
+		candidate: LocatedReference,
+		parent: TaskLine,
+	): Promise<void> {
+		const { document } = candidate;
+		let index = await this.representationIndex(origin, document, parent, 'Plan');
+		const root = document.at(candidate.line);
+		const rows = document.lines.splice(
+			root.lineIndex,
+			document.end(candidate.line) - root.lineIndex,
+		);
+		if (index > root.lineIndex) {
+			index -= rows.length;
+		}
+		const child = document.tasks().find((task) => document.parent(task.line)?.line === parent);
+		document.reindent(rows, root.indent, child?.indent ?? `${document.at(parent).indent}  `);
+		document.insert(index, rows);
+	}
+
+	private async insertRepresentation(
 		origin: LocatedReference,
 		destination: LinkedTaskDocument,
-		options: { parent?: TaskLine; preserveIds: boolean; tree: boolean },
+		options: {
+			parent?: TaskLine;
+			preserveIds: boolean;
+			tree: boolean;
+			section: 'Backlog' | 'Plan';
+		},
 	): Promise<LocatedReference & { lines: Map<TaskLine, TaskLine> }> {
-		const { parent, preserveIds, tree } = options;
+		const { parent, preserveIds, tree, section } = options;
 		const task = origin.document.at(origin.line);
 		const descendants = new Set(
 			origin.document
@@ -828,10 +937,28 @@ class LinkedTaskOperations {
 					(line) => line.raw.match(/(?:^|\s)\^([A-Za-z0-9-]+)\s*$/)?.[1] === id,
 				)
 			) {
-				throw new Error(`Backlog task block ^${id} already exists in the destination.`);
+				throw new Error(`Task representation block ^${id} already exists in the destination.`);
 			}
 		}
-		let index = parent ? destination.end(parent) : destination.sectionIndex('Backlog');
+		const index = await this.representationIndex(origin, destination, parent, section);
+		const existingChild = parent
+			? destination.tasks().find((candidate) => destination.parent(candidate.line)?.line === parent)
+			: undefined;
+		const indent = parent ? (existingChild?.indent ?? `${destination.at(parent).indent}  `) : '';
+		destination.reindent(rows, task.indent, indent);
+		destination.insert(index, rows);
+		return { document: destination, line: rows[0]!, lines: copiedLines };
+	}
+
+	// eslint-disable-next-line eslint/max-params
+	private async representationIndex(
+		origin: LocatedReference,
+		destination: LinkedTaskDocument,
+		parent: TaskLine | undefined,
+		section: 'Backlog' | 'Plan',
+	): Promise<number> {
+		const task = origin.document.at(origin.line);
+		let index = parent ? destination.end(parent) : destination.sectionIndex(section);
 		if (parent) {
 			const siblings = origin.document
 				.tasks()
@@ -852,7 +979,7 @@ class LinkedTaskOperations {
 						)
 					: [];
 				if (matches.length > 1) {
-					throw new Error('The linked project sibling was ambiguous.');
+					throw new Error('The linked task sibling was ambiguous.');
 				}
 				if (matches[0]) {
 					index =
@@ -863,13 +990,7 @@ class LinkedTaskOperations {
 				}
 			}
 		}
-		const existingChild = parent
-			? destination.tasks().find((candidate) => destination.parent(candidate.line)?.line === parent)
-			: undefined;
-		const indent = parent ? (existingChild?.indent ?? `${destination.at(parent).indent}  `) : '';
-		destination.reindent(rows, task.indent, indent);
-		destination.insert(index, rows);
-		return { document: destination, line: rows[0]!, lines: copiedLines };
+		return index;
 	}
 
 	// eslint-disable-next-line eslint/max-params

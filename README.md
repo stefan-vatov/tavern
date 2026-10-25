@@ -122,6 +122,13 @@ The daily tree is removed after the transfer succeeds. Other linked copies and
 checkbox states stay intact. The option is disabled while the other pane shows
 the global queue.
 
+Right-click a task in a project, the global queue, the focus queue, or search
+and choose **To Captain's Log** to add its whole tree to the day displayed in
+the log. The project source stays in place. Existing linked daily tasks are
+reused, missing descendants are merged, and linked copies hidden in Notes move
+into visible Plan. Repeating the action does not duplicate the tree. Create the
+selected day's log first; the option is disabled until that note exists.
+
 Drag a task's handle from the global or focus queue into the daily log to copy
 it, including its nested tasks. Drag a parent to copy its whole group; nested
 queue tasks cannot be dragged into the log separately. The source stays in its project. Tavern adds
