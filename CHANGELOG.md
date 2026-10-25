@@ -1,3 +1,9 @@
+## [1.9.2](https://github.com/stefan-vatov/tavern/compare/1.9.1...1.9.2) (2026-10-25)
+
+### Performance Improvements
+
+- keep task search responsive with prepared worker indexes ([a7c473b](https://github.com/stefan-vatov/tavern/commit/a7c473b5ceace7cf4513e7b9d47e70a119d1e0aa))
+
 ## [1.9.1](https://github.com/stefan-vatov/tavern/compare/1.9.0...1.9.1) (2026-10-25)
 
 ### Bug Fixes
