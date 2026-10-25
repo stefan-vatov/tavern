@@ -138,33 +138,117 @@ describe('returning daily task trees to a project backlog', () => {
 		},
 	);
 
-	it('keeps every existing counterpart in its current section, even with multiple copies', async () => {
-		const state = await fixture();
-		const project =
-			'---\ntavern: project\n---\n## Work\n- [ ] Existing ^one\n## Done\n- [x] Second ^two\n';
-		state.vault.files.set(sourcePath, project);
-		state.vault.files.set(dailyPath, '### Plan\n- [ ] Daily ^daily\n');
-		await state.options.saveLinks([
-			{
-				source: { path: dailyPath, blockId: 'daily' },
-				copies: [
-					{ path: sourcePath, blockId: 'one' },
-					{ path: sourcePath, blockId: 'two' },
+	it.each(['existing tree', 'unregistered child', 'registered child'])(
+		'keeps every project counterpart in place and merges a %s into each tree',
+		async (kind) => {
+			const state = await fixture();
+			const project =
+				'---\ntavern: project\n---\n## Work\n- [ ] Existing ^one\n## Done\n- [x] Second ^two\n';
+			const other = 'Daily/2026/10/2026-10-23.md';
+			state.vault.files.set(sourcePath, project);
+			state.vault.files.set(dailyPath, '### Plan\n- [ ] Daily ^daily\n');
+			const links: DailyTaskLink[] = [
+				{
+					source: { path: dailyPath, blockId: 'daily' },
+					copies: [
+						{ path: sourcePath, blockId: 'one' },
+						{ path: sourcePath, blockId: 'two' },
+					],
+					checked: false,
+				},
+			];
+			if (kind !== 'existing tree') {
+				state.vault.files.set(
+					dailyPath,
+					'### Plan\n- [ ] Daily ^daily\n  - [x] Child ^daily-child\n    note kept\n    - [ ] Grandchild ^daily-grandchild\n    continuation kept\n\n    - [x] Next ^daily-next\n',
+				);
+			}
+			if (kind === 'registered child') {
+				state.vault.files.set(
+					other,
+					'### Plan\n- [x] Child ^other-child\n  - [ ] Grandchild ^other-grandchild\n  - [x] Next ^other-next\n',
+				);
+				for (const [id, checked] of [
+					['child', true],
+					['grandchild', false],
+					['next', true],
+				] as const) {
+					links.push({
+						source: { path: other, blockId: `other-${id}` },
+						copies: [{ path: dailyPath, blockId: `daily-${id}` }],
+						checked,
+					});
+				}
+			}
+			await state.options.saveLinks(links);
+			await state.service.returnTaskToBacklog(day, 'block:daily', sourcePath);
+			expect(state.vault.files.get(dailyPath)).toBe('### Plan\n');
+			expect(
+				state
+					.links()
+					.flatMap((link) => [link.source, ...link.copies])
+					.some((endpoint) => endpoint.path === dailyPath),
+			).toBe(false);
+			if (kind === 'existing tree') {
+				expect(state.vault.files.get(sourcePath)).toBe(project);
+				expect(state.links()).toEqual([
+					{
+						source: { path: sourcePath, blockId: 'one' },
+						copies: [{ path: sourcePath, blockId: 'two' }],
+						checked: false,
+					},
+				]);
+				return;
+			}
+			const { sections } = Effect.runSync(parseProjectNote(state.vault.files.get(sourcePath)!));
+			expect(
+				sections.map((section) => [
+					section.name,
+					section.tasks.map((task) => [task.text, task.indent, task.checked]),
+				]),
+			).toEqual([
+				[
+					'Work',
+					[
+						['Existing', '', false],
+						['Child', '  ', true],
+						['Grandchild', '    ', false],
+						['Next', '    ', true],
+					],
 				],
-				checked: false,
-			},
-		]);
-		await state.service.returnTaskToBacklog(day, 'block:daily', sourcePath);
-		expect(state.vault.files.get(sourcePath)).toBe(project);
-		expect(state.vault.files.get(dailyPath)).toBe('### Plan\n');
-		expect(state.links()).toEqual([
-			{
-				source: { path: sourcePath, blockId: 'one' },
-				copies: [{ path: sourcePath, blockId: 'two' }],
-				checked: false,
-			},
-		]);
-	});
+				[
+					'Done',
+					[
+						['Second', '', true],
+						['Child', '  ', true],
+						['Grandchild', '    ', false],
+						['Next', '    ', true],
+					],
+				],
+			]);
+			const tasks = sections.flatMap((section) => section.tasks);
+			expect(tasks.every((task) => task.blockId)).toBe(true);
+			expect(new Set(tasks.map((task) => task.blockId)).size).toBe(tasks.length);
+			expect(
+				state.vault.files
+					.get(sourcePath)!
+					.replace(/ \^[A-Za-z0-9-]+/g, '')
+					.match(
+						/  - \[x\] Child\n    note kept\n    - \[ \] Grandchild\n    continuation kept\n\n    - \[x\] Next\n/g,
+					),
+			).toHaveLength(2);
+			const child = state.tasks().find((task) => task.text === 'Child')!;
+			await state.service.editProjectTaskPlan(child, {
+				text: 'Edited child',
+				children: [],
+				siblings: [],
+			});
+			expect(state.tasks().filter((task) => task.text === 'Edited child')).toHaveLength(2);
+			if (kind === 'registered child') {
+				expect(state.vault.files.get(other)).toContain('Edited child');
+			}
+		},
+	);
 
 	it('merges missing descendants under the existing parent and preserves other linked notes', async () => {
 		const state = await fixture();
@@ -239,7 +323,7 @@ describe('returning daily task trees to a project backlog', () => {
 		'invalid project',
 		'missing endpoint',
 		'ambiguous endpoint',
-		'ambiguous parent',
+		'ambiguous sibling',
 		'block collision',
 	])('retains the daily tree without writes on %s', async (failure) => {
 		const state = await fixture();
@@ -273,16 +357,23 @@ describe('returning daily task trees to a project backlog', () => {
 				`${state.vault.files.get(sourcePath)!}- [ ] Duplicate ^project-parent\n`,
 			);
 		}
-		if (failure === 'ambiguous parent') {
-			links[0]!.source = { path: dailyPath, blockId: 'daily-parent' };
-			links[0]!.copies = [
-				{ path: sourcePath, blockId: 'project-parent' },
-				{ path: sourcePath, blockId: 'another' },
-			];
+		if (failure === 'ambiguous sibling') {
+			state.vault.files.set(
+				dailyPath,
+				'### Plan\n- [ ] Parent ^daily-parent\n  - [ ] Sibling ^daily-sibling\n  - [ ] Child ^daily-child\n',
+			);
 			state.vault.files.set(
 				sourcePath,
-				`${state.vault.files.get(sourcePath)!}- [ ] Another ^another\n`,
+				'---\ntavern: project\n---\n## Work\n- [ ] Parent ^project-parent\n  - [ ] Sibling ^project-sibling\n  - [ ] Another copy ^project-sibling-two\n',
 			);
+			links.push({
+				source: { path: dailyPath, blockId: 'daily-sibling' },
+				copies: [
+					{ path: sourcePath, blockId: 'project-sibling' },
+					{ path: sourcePath, blockId: 'project-sibling-two' },
+				],
+				checked: false,
+			});
 		}
 		if (failure === 'block collision') {
 			state.vault.files.set(

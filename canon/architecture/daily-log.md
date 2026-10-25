@@ -117,7 +117,9 @@ the tree from the current note, including tasks hidden by filters.
 Registered counterparts already in the displayed project keep their current
 sections and placement; do not duplicate them or force them into Backlog. If
 only part of the tree exists there, merge missing tasks under their existing
-project parents. A wholly absent root and its missing tree go into `Backlog`,
+project parents. When the same linked parent has multiple representations in
+the project, missing descendants reach each representation; their existence
+alone is not ambiguity. A wholly absent root and its missing tree go into `Backlog`,
 creating that section when necessary. Existing identities, rather than matching
 text, establish whether a task is already represented. Missing or ambiguous
 registered endpoints and ambiguous merge destinations are visible failures.
