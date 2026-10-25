@@ -1,3 +1,9 @@
+# [1.7.0](https://github.com/stefan-vatov/tavern/compare/1.6.1...1.7.0) (2026-10-25)
+
+### Features
+
+- carry unfinished daily task trees into new logs ([c6db783](https://github.com/stefan-vatov/tavern/commit/c6db783f646ad010f562be5edd640cada151ef8c))
+
 ## [1.6.1](https://github.com/stefan-vatov/tavern/compare/1.6.0...1.6.1) (2026-10-25)
 
 ### Bug Fixes
