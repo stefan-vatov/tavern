@@ -1,3 +1,9 @@
+## [1.7.1](https://github.com/stefan-vatov/tavern/compare/1.7.0...1.7.1) (2026-10-25)
+
+### Bug Fixes
+
+- remove daily placeholder when carrying tasks forward ([a8f62e4](https://github.com/stefan-vatov/tavern/commit/a8f62e4129e05a15f2ebb8a5a7e8dc87e10360ae))
+
 # [1.7.0](https://github.com/stefan-vatov/tavern/compare/1.6.1...1.7.0) (2026-10-25)
 
 ### Features
