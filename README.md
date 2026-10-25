@@ -76,10 +76,21 @@ If the selected day's note is missing, Tavern shows **No note** and **Create dai
 log**; it never substitutes an older note or creates one automatically.
 
 Daily notes live at `02_Daily_Log/Daily_Log/YYYY/MM/YYYY-MM-DD.md` by default.
-Change the base folder in Tavern settings. **Create daily log** makes a plain
-Markdown note with `General`, `Plan`, and `Notes` headings. Existing notes keep
-their content. You can search, edit, check, add, reorder, and nest tasks in the
-log. Dragging within the log works like the project side: drop near a row's top
+Change the base folder in Tavern settings. Under **Daily log template**, click
+**Choose** to select a Markdown template from your vault, and enable the
+Templater plugin. **Create daily log** uses Templater to render that file into
+the selected day's note. Creation waits for Templater; missing configuration or
+template errors are shown without falling back to a basic note. Existing notes
+keep their content and do not require Templater to read or edit.
+
+The new file already has its `YYYY-MM-DD` title when Templater runs, so a
+conditional `Untitled` rename branch will not run. Template functions keep their
+normal meanings: `tp.file.title` is the selected date, while `tp.date.now()` is
+the actual current date. Templates should leave the result at the configured
+daily-note path; if a script moves it, Tavern reports the resulting path rather
+than creating another note or undoing the script's changes.
+
+You can search, edit, check, add, reorder, and nest tasks in the log. Dragging within the log works like the project side: drop near a row's top
 or bottom edge to reorder, or over its middle to the right to make a subitem.
 Moving a parent carries its whole group. Tasks written directly in a daily note
 can be checked and unchecked without belonging to a project or queue. Checking a task keeps the log and unfinished

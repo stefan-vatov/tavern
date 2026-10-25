@@ -99,10 +99,12 @@ const addDailyTaskPlan = (markdown: string, plan: TaskEditPlan): TaskEditResult 
 };
 
 class DailyLogStore {
+	// eslint-disable-next-line eslint/max-params -- Preserve the injected clock while adding the production note creator.
 	constructor(
 		public readonly vault: DailyLogVault,
 		private readonly folder: () => string,
 		private readonly now: () => Date = () => new Date(),
+		private readonly createNote?: (path: string, day: string) => Promise<void>,
 	) {}
 
 	today(): string {
@@ -124,6 +126,14 @@ class DailyLogStore {
 
 	async create(day: string): Promise<void> {
 		const path = this.path(day);
+		if (this.createNote) {
+			await this.createNote(path, day);
+			return;
+		}
+		await this.createBasicNote(path, day);
+	}
+
+	private async createBasicNote(path: string, day: string): Promise<void> {
 		if (this.vault.getAbstractFileByPath(path)) {
 			return;
 		}

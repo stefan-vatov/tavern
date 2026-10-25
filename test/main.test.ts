@@ -1,6 +1,6 @@
 /* eslint-disable eslint/max-statements, eslint/no-magic-numbers, promise/prefer-await-to-callbacks */
 import { beforeEach, vi } from 'vitest';
-import { Platform } from 'obsidian';
+import { Platform, TFile, TFolder } from 'obsidian';
 import TavernPlugin from '../src/main';
 import { TavernView } from '../src/view';
 import { TAVERN_VIEW_TYPE } from '../src/project-mode';
@@ -12,12 +12,16 @@ const { noticeMock } = vi.hoisted(() => ({ noticeMock: vi.fn() }));
 vi.mock('obsidian', () => ({
 	App: class {},
 	Component: class {},
+	FuzzySuggestModal: class {},
 	ItemView: class {},
 	Notice: noticeMock,
 	Platform: { isDesktopApp: true },
 	Plugin: class {},
 	PluginSettingTab: class {},
 	Setting: class {},
+	TFile: class {},
+	TFolder: class {},
+	normalizePath: (path: string) => path,
 	setIcon: vi.fn(),
 }));
 
@@ -185,6 +189,54 @@ describe('Tavern app window', () => {
 		expect(action).toBe('tavern');
 		await handler({ action: 'tavern' });
 		expect(activate).toHaveBeenCalledTimes(3);
+	});
+
+	it('creates daily logs through Templater using the current saved template selection', async () => {
+		const { plugin, leaf, workspace } = setup();
+		const first = Object.assign(new TFile(), { path: 'Templates/First.md', extension: 'md' });
+		const second = Object.assign(new TFile(), { path: 'Templates/Second.md', extension: 'md' });
+		const folder = Object.assign(new TFolder(), { path: 'Daily/2026/10' });
+		const entries = new Map<string, TFile | TFolder>([
+			[first.path, first],
+			[second.path, second],
+			[folder.path, folder],
+			['Daily', Object.assign(new TFolder(), { path: 'Daily' })],
+			['Daily/2026', Object.assign(new TFolder(), { path: 'Daily/2026' })],
+		]);
+		const create = vi.fn(async (template: TFile, parent: TFolder, title: string) => {
+			expect(parent).toBe(folder);
+			const created = Object.assign(new TFile(), { path: `${parent.path}/${title}.md` });
+			entries.set(created.path, created);
+			expect([first, second]).toContain(template);
+			return created;
+		});
+		plugin.app = {
+			...plugin.app,
+			plugins: { getPlugin: () => ({ templater: { create_new_note_from_template: create } }) },
+			vault: {
+				on: vi.fn(),
+				getRoot: () => new TFolder(),
+				getAbstractFileByPath: (path: string) => entries.get(path) ?? null,
+			},
+		} as never;
+		vi.mocked(plugin.loadData).mockResolvedValue({
+			dailyLogFolder: 'Daily',
+			dailyLogTemplate: first.path,
+		});
+		await plugin.onload();
+		const [, factory] = vi.mocked(plugin.registerView).mock.calls[0]!;
+		const view = factory(leaf as never) as unknown as { deps: { dailyLogs: DailyLogController } };
+		await view.deps.dailyLogs.create('2026-10-24');
+		plugin.settings.dailyLogTemplate = second.path;
+		await view.deps.dailyLogs.create('2026-10-25');
+		expect(create.mock.calls.map(([template]) => template)).toEqual([first, second]);
+		plugin.settings.dailyLogTemplate = '';
+		await expect(view.deps.dailyLogs.create('2026-10-26')).rejects.toThrow(
+			'Choose a daily log template',
+		);
+		expect(create).toHaveBeenCalledTimes(2);
+		expect(workspace.getLeaf).not.toHaveBeenCalled();
+		expect(workspace.revealLeaf).not.toHaveBeenCalled();
 	});
 
 	it('creates one desktop window for concurrent opens and keeps its current state', async () => {
@@ -434,6 +486,7 @@ describe('Tavern app window', () => {
 			availableTasksCollapsed: false,
 			boardTaskKeys: [],
 			dailyLogFolder: '02_Daily_Log/Daily_Log',
+			dailyLogTemplate: '',
 			dailyTaskLinks: [],
 			projectFolders: ['Projects'],
 			sidebarCollapsedSections: [],

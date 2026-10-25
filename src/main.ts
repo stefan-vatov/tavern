@@ -1,5 +1,6 @@
 import { Notice, Platform, Plugin, type WorkspaceLeaf } from 'obsidian';
 import { DailyLogService } from './daily-log-service';
+import { createDailyNoteFromTemplate } from './daily-note-creator';
 import { DailyLogStore, type DailyLogVault } from './daily-log-store';
 import { createTavernViewState } from './project-mode';
 import { DEFAULT_SETTINGS, TavernSettingTab } from './settings';
@@ -24,6 +25,8 @@ class TavernPlugin extends Plugin {
 			new DailyLogStore(
 				this.app.vault as unknown as DailyLogVault,
 				() => this.settings.dailyLogFolder ?? DEFAULT_SETTINGS.dailyLogFolder!,
+				undefined,
+				(path) => createDailyNoteFromTemplate(this.app, this.settings.dailyLogTemplate ?? '', path),
 			),
 			{
 				links: () => this.settings.dailyTaskLinks ?? [],

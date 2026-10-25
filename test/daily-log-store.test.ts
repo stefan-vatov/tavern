@@ -139,6 +139,39 @@ describe('daily log vault storage', () => {
 		expect([...vault.files.keys()]).toEqual([path]);
 	});
 
+	it('awaits template creation and surfaces failures even when a partial note exists', async () => {
+		const vault = new MemoryVault();
+		let finish: () => void = () => {};
+		// eslint-disable-next-line promise/avoid-new -- Hold template execution to observe whether creation awaits it.
+		const ready = new Promise<void>((resolve) => {
+			finish = resolve;
+		});
+		const create = vi.fn(async (target: string, selectedDay: string) => {
+			expect(target).toBe(path);
+			expect(selectedDay).toBe(day);
+			vault.files.set(target, 'Partial template output');
+			await ready;
+			throw new Error('Template failed');
+		});
+		const store = new DailyLogStore(vault, () => '02_Daily_Log/Daily_Log', undefined, create);
+		let settled = false;
+		const observeCreation = async () => {
+			try {
+				await store.create(day);
+			} finally {
+				settled = true;
+			}
+		};
+		const result = observeCreation();
+		await Promise.resolve();
+		expect(settled).toBe(false);
+		expect(vault.folders.size).toBe(0);
+		finish();
+		await expect(result).rejects.toThrow('Template failed');
+		expect(vault.files.get(path)).toBe('Partial template output');
+		expect(create).toHaveBeenCalledTimes(1);
+	});
+
 	it('mutates fresh Markdown atomically while preserving metadata, narrative, IDs and nested task trees', async () => {
 		const vault = new MemoryVault();
 		const store = makeStore(vault);

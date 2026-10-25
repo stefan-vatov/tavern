@@ -5,11 +5,15 @@ scope:
   - linked tasks
 validation:
   - test/daily-note.test.ts
+  - test/daily-note-creator.test.ts
+  - test/settings.test.ts
+  - test/main.test.ts
   - test/daily-log-store.test.ts
   - test/daily-log-service.test.ts
   - test/project-note.test.ts
   - test/view.test.ts
 related:
+  - ../decisions/2026-10-25-daily-log-template.md
   - ./persistence.md
   - ./project-workflow.md
   - ../decisions/2026-10-24-linked-daily-tasks.md
@@ -31,10 +35,25 @@ and a **Create daily log** action. Tavern must not fall back to an older note
 or create a note merely by reading or selecting a day. Read failures are
 errors, not evidence that a note is absent.
 
-Explicit creation supplies a plain Markdown note with the day's heading and
-`General`, `Plan`, and `Notes` headings, creating parent folders as needed.
-Creation must not overwrite an existing note. Daily-task changes preserve
-surrounding note content and operate on the current Markdown. Blank task
+Explicit creation requires an enabled Templater plugin and a vault Markdown
+template selected in Tavern settings. Tavern invokes Templater's creation API
+and awaits its result, creating required parent folders. It must not recreate
+Templater's interpreter or fall back to a basic note. Missing configuration,
+unavailable creation API, failed rendering, and missing output are visible
+errors, visible in Tavern even when background vault events refresh the log.
+Existing notes must not be overwritten and remain usable without
+Templater. Tavern requests creation without opening or revealing the note.
+
+The target has the selected day's `YYYY-MM-DD` title before the template runs;
+Templater date functions retain their ordinary current-date semantics. A
+conditional rename for `Untitled` titles therefore does not execute. If a
+template moves the result away from the expected daily-note path, report the
+actual and expected paths; do not silently create a second note or reverse
+arbitrary script effects. Tavern does not promise to roll back template scripts
+or await independent asynchronous callbacks they schedule.
+
+Daily-task changes preserve surrounding note content and operate on the current
+Markdown. Blank task
 creation is rejected. Keyboard entry and cleared-row cleanup follow the
 [shared task-editing contract](task-editing.md). Task reordering and nesting
 carry the task's nested tree.

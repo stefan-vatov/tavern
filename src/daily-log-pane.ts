@@ -214,7 +214,7 @@ class DailyLogPane extends Component {
 			this.contentEvents.registerDomEvent(
 				create,
 				'click',
-				() => void this.mutate(() => this.controller.create(this.day)),
+				() => void this.mutate(() => this.controller.create(this.day), [], this.header),
 			);
 			return;
 		}
@@ -539,6 +539,7 @@ class DailyLogPane extends Component {
 	private mutate(
 		action: () => Promise<void>,
 		references: DailyTaskReference[] = [],
+		errorHost: HTMLElement = this.content,
 	): Promise<void> {
 		for (const reference of references) {
 			this.pendingTaskReferences.add(reference);
@@ -556,13 +557,14 @@ class DailyLogPane extends Component {
 				if (!this.active) {
 					return;
 				}
+				this.errorEl?.remove();
 				await this.options.onChanged();
 				if (this.active) {
 					await this.refresh();
 				}
 			} catch (error) {
 				if (this.active) {
-					this.showError(error);
+					this.showError(error, errorHost);
 					new Notice(`Tavern: ${error instanceof Error ? error.message : String(error)}`);
 				}
 			} finally {
@@ -575,10 +577,10 @@ class DailyLogPane extends Component {
 		return mutation;
 	}
 
-	private showError(error: unknown): void {
+	private showError(error: unknown, host: HTMLElement = this.content): void {
 		this.renderedLayout = '';
 		this.errorEl?.remove();
-		this.errorEl = this.content.createDiv({
+		this.errorEl = host.createDiv({
 			cls: 'tavern-daily-error',
 			text: error instanceof Error ? error.message : String(error),
 		});

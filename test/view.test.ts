@@ -3920,6 +3920,26 @@ tavern: project
 			await vi.waitFor(() => expect(controller.create).toHaveBeenCalledWith('2026-10-24'));
 		});
 
+		it('keeps a failed creation visible through vault refreshes and clears it after a successful retry', async () => {
+			const controller = createDailyController(null);
+			controller.create.mockRejectedValueOnce(new Error('Templater did not create the daily log'));
+			const view = dailyView(controller);
+			await view.onOpen();
+			const root = rootElements.at(-1)!;
+			await vi.waitFor(() => expect(findByText(root, 'Create daily log')).toBeDefined());
+			findByText(root, 'Create daily log')!.dispatch('click');
+			await vi.waitFor(() =>
+				expect(textValues(root)).toContain('Templater did not create the daily log'),
+			);
+			await view.refreshProjects();
+			await view.refreshProjects();
+			expect(textValues(root)).toContain('Templater did not create the daily log');
+			expect(findByText(root, 'Create daily log')).toBeDefined();
+			findByText(root, 'Create daily log')!.dispatch('click');
+			await vi.waitFor(() => expect(controller.create).toHaveBeenCalledTimes(2));
+			await vi.waitFor(() => expect(findByClass(root, 'tavern-daily-error')).toBeUndefined());
+		});
+
 		it('navigates by day, returns to today and starts a reopened view at today', async () => {
 			const controller = createDailyController();
 			const view = dailyView(controller);
