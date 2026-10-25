@@ -13,6 +13,7 @@ validation:
   - test/project-note.test.ts
   - test/view.test.ts
 related:
+  - ../decisions/2026-10-25-daily-carry-forward.md
   - ../decisions/2026-10-25-daily-log-template.md
   - ./persistence.md
   - ./project-workflow.md
@@ -67,6 +68,31 @@ tree's relative nesting. Before/after drops adopt the target's sibling level.
 A task cannot be moved inside its own descendants.
 Linked trees cannot be copied beneath themselves or their descendant
 counterparts; a separate sibling copy remains valid.
+
+## Carry-forward on explicit creation
+
+After a new selected-day note is rendered successfully, move task trees from the
+immediately preceding calendar day's note into the new note's `Plan` section,
+after existing template content. A top-level tree moves if any task in it is
+incomplete; preserve its entire tree, including completed parents or descendants,
+raw task details, nesting, ordering, and block IDs. Fully completed trees and
+surrounding old-note content stay behind. Missing previous-day notes do not cause
+searches of older notes. Reading a note or invoking creation for an existing
+destination must not carry work again. This action introduces no task dates,
+scheduled creation, or recurrence.
+
+Carry-forward relocates daily representations; project tasks and other linked
+copies stay in place. Update the moved endpoint's path, retaining its block ID
+and source/copy role so all existing linked operations still reach it. Validate
+moved identities and registered counterparts before transfer writes; reject block
+ID collisions in the new note instead of guessing or replacing template content.
+
+Stage source, destination, and reference changes through the linked-write
+contract below. Write the destination before removing source work. If transfer
+fails, report the failure in Tavern and attempt rollback of its note/reference
+changes. The newly rendered template note remains the destination baseline;
+arbitrary template side effects are not rolled back. No automatic retry into an
+existing note or new recovery policy for external concurrent edits is established.
 
 ## Copies and stable references
 

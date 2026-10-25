@@ -215,6 +215,7 @@ describe('Tavern app window', () => {
 			plugins: { getPlugin: () => ({ templater: { create_new_note_from_template: create } }) },
 			vault: {
 				on: vi.fn(),
+				read: async () => '# Daily log\n\n### Plan\n',
 				getRoot: () => new TFolder(),
 				getAbstractFileByPath: (path: string) => entries.get(path) ?? null,
 			},

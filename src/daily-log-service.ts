@@ -6,6 +6,7 @@ import type {
 	DailyLogSnapshot,
 } from './daily-log-controller';
 import { addDailyTaskPlan, DailyLogStore } from './daily-log-store';
+import { shiftDay } from './daily-note';
 import { addProjectTaskPlan } from './project-actions';
 import {
 	LinkedTaskOperations,
@@ -50,7 +51,31 @@ class DailyLogService implements DailyLogController {
 		return this.enqueue(() => this.store.read(day));
 	}
 	create(day: string): Promise<void> {
-		return this.enqueue(() => this.store.create(day));
+		return this.enqueue(async () => {
+			if ((await this.store.read(day)).note) {
+				return;
+			}
+			if (!(await this.store.create(day))) {
+				return;
+			}
+			const previousPath = this.store.path(shiftDay(day, -1));
+			if (!this.store.vault.getAbstractFileByPath(previousPath)) {
+				return;
+			}
+			const reference = { path: this.store.path(day), id: '' };
+			try {
+				await this.operation(reference, (engine) =>
+					engine.carryForward(previousPath, reference.path),
+				);
+			} catch (error) {
+				throw Object.assign(
+					new Error(
+						`The daily log was created, but carry-forward failed: ${error instanceof Error ? error.message : String(error)}`,
+					),
+					{ cause: error },
+				);
+			}
+		});
 	}
 	async addTask(day: string, text: string): Promise<void> {
 		if (!text.trim()) {

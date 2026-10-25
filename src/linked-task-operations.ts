@@ -554,6 +554,65 @@ class LinkedTaskOperations {
 		await this.cloneTree(origin, destination, anchor, target?.placement);
 	}
 
+	async carryForward(previousPath: string, destinationPath: string): Promise<void> {
+		if (previousPath === destinationPath) {
+			return;
+		}
+		const previous = await this.document(previousPath);
+		const destination = await this.document(destinationPath);
+		const tasks = previous.tasks();
+		const groups = tasks
+			.filter((task) => !previous.parent(task.line))
+			.map((root) => ({ root, lines: previous.group(root.line) }))
+			.filter(({ lines }) => tasks.some((task) => lines.includes(task.line) && !task.checked));
+		const selected = new Set(groups.flatMap(({ lines }) => lines));
+		const blockIds = new Set<string>();
+		for (const task of tasks.filter((candidate) => selected.has(candidate.line))) {
+			previous.locate(task.id);
+			if (task.blockId) {
+				blockIds.add(task.blockId);
+			}
+		}
+		for (const link of this.links.filter((candidate) =>
+			endpoints(candidate).some(
+				(endpoint) => endpoint.path === previousPath && blockIds.has(endpoint.blockId),
+			),
+		)) {
+			await this.validate(link);
+		}
+		const destinationIds = new Set(
+			destination.lines.flatMap((line) => {
+				const id = line.raw.match(/(?:^|\s)\^([A-Za-z0-9-]+)\s*$/)?.[1];
+				return id ? [id] : [];
+			}),
+		);
+		for (const line of selected) {
+			const id = line.raw.match(/(?:^|\s)\^([A-Za-z0-9-]+)\s*$/)?.[1];
+			if (id && destinationIds.has(id)) {
+				throw new Error(`Daily carry-forward block ^${id} already exists in the destination.`);
+			}
+		}
+		const trees = groups.map(({ root, lines }) => ({
+			line: root.line,
+			markdown: lines.map((line) => line.raw).join('\n'),
+		}));
+		for (const tree of trees) {
+			destination.insertTree(tree.markdown);
+		}
+		for (const tree of trees) {
+			previous.delete(tree.line, 'tree');
+		}
+		for (const link of this.links) {
+			for (const endpoint of endpoints(link)) {
+				if (endpoint.path === previousPath && blockIds.has(endpoint.blockId)) {
+					endpoint.path = destinationPath;
+				}
+			}
+		}
+		this.documents.delete(previousPath);
+		this.documents.set(previousPath, previous);
+	}
+
 	// eslint-disable-next-line eslint/max-params
 	private async cloneTree(
 		origin: LocatedReference,

@@ -104,7 +104,7 @@ class DailyLogStore {
 		public readonly vault: DailyLogVault,
 		private readonly folder: () => string,
 		private readonly now: () => Date = () => new Date(),
-		private readonly createNote?: (path: string, day: string) => Promise<void>,
+		private readonly createNote?: (path: string, day: string) => Promise<boolean>,
 	) {}
 
 	today(): string {
@@ -124,26 +124,27 @@ class DailyLogStore {
 		return { day, path, note: parseDailyNote(await this.vault.read(file)) };
 	}
 
-	async create(day: string): Promise<void> {
+	async create(day: string): Promise<boolean> {
 		const path = this.path(day);
 		if (this.createNote) {
-			await this.createNote(path, day);
-			return;
+			return this.createNote(path, day);
 		}
-		await this.createBasicNote(path, day);
+		return this.createBasicNote(path, day);
 	}
 
-	private async createBasicNote(path: string, day: string): Promise<void> {
+	private async createBasicNote(path: string, day: string): Promise<boolean> {
 		if (this.vault.getAbstractFileByPath(path)) {
-			return;
+			return false;
 		}
 		await this.createAncestors(path);
 		try {
 			await this.vault.create(path, createDailyNote(day));
+			return true;
 		} catch (error) {
 			if (!this.vault.getAbstractFileByPath(path)) {
 				throw error;
 			}
+			return false;
 		}
 	}
 

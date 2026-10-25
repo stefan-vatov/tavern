@@ -57,7 +57,9 @@ describe('Templater daily note creation boundary', () => {
 			return created;
 		});
 
-		await createDailyNoteFromTemplate(fixture.app, ' /Templates/Daily ', path);
+		await expect(
+			createDailyNoteFromTemplate(fixture.app, ' /Templates/Daily ', path),
+		).resolves.toBe(true);
 
 		expect(fixture.registry.getPlugin).toHaveBeenCalledWith('templater-obsidian');
 		expect(fixture.create).toHaveBeenCalledExactlyOnceWith(
@@ -136,7 +138,7 @@ describe('Templater daily note creation boundary', () => {
 		fixture.entries.set(path, existing);
 		fixture.registry.getPlugin.mockReturnValue(undefined);
 
-		await createDailyNoteFromTemplate(fixture.app, templatePath, path);
+		await expect(createDailyNoteFromTemplate(fixture.app, templatePath, path)).resolves.toBe(false);
 
 		expect(fixture.entries.get(path)).toBe(existing);
 		expect(fixture.vault.createFolder).not.toHaveBeenCalled();

@@ -78,11 +78,11 @@ const createDailyNoteFromTemplate = async (
 	app: App,
 	templatePath: string,
 	path: string,
-): Promise<void> => {
+): Promise<boolean> => {
 	const expectedPath = normalizePath(path);
 	const existing = app.vault.getAbstractFileByPath(expectedPath);
 	if (existing instanceof TFile) {
-		return;
+		return false;
 	}
 	if (existing) {
 		throw new Error(`A folder blocks the daily log note: ${expectedPath}`);
@@ -106,6 +106,7 @@ const createDailyNoteFromTemplate = async (
 	if (app.vault.getAbstractFileByPath(expectedPath) !== created) {
 		throw new Error(`The daily log created by Templater was not found: ${expectedPath}`);
 	}
+	return true;
 };
 
 export { createDailyNoteFromTemplate };

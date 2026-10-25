@@ -90,6 +90,18 @@ the actual current date. Templates should leave the result at the configured
 daily-note path; if a script moves it, Tavern reports the resulting path rather
 than creating another note or undoing the script's changes.
 
+After the template finishes, creating a new log moves unfinished work from the
+previous calendar day's log into its `Plan` section. A whole task tree moves if
+any task in it is incomplete, including completed items within that tree. Fully
+completed trees stay in the previous note. Task text, nested details, block IDs,
+and links to projects and other copies stay intact; the moved tasks leave the
+previous log. If that exact previous day has no note, Tavern does not search
+older notes. Opening or creating an already existing log does not carry work again.
+
+If carry-forward fails after the template is created, Tavern shows the error and
+attempts to restore the transfer's note and link changes. The new template note
+remains; Tavern does not automatically retry transfers into existing notes.
+
 You can search, edit, check, add, reorder, and nest tasks in the log. Dragging within the log works like the project side: drop near a row's top
 or bottom edge to reorder, or over its middle to the right to make a subitem.
 Moving a parent carries its whole group. Tasks written directly in a daily note

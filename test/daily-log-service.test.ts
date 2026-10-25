@@ -1371,3 +1371,276 @@ describe('linked daily log tasks', () => {
 		expect(state.tasks().find((task) => task.checked)?.sectionName).toBe('Done');
 	});
 });
+
+const nextDay = '2026-10-25';
+const nextDailyPath = 'Daily/2026/10/2026-10-25.md';
+const carryTemplate =
+	'# New day\n### Plan\n- [ ] Template item ^template\n### Notes\nNew narrative.\n';
+
+const carryFixture = async (template = carryTemplate) => {
+	const state = await fixture();
+	const render = vi.fn(async (path: string) => {
+		await state.vault.create(path, template);
+		return true;
+	});
+	const store = new DailyLogStore(
+		state.vault,
+		() => 'Daily',
+		() => new Date(),
+		render,
+	);
+	const service = new DailyLogService(store, state.options);
+	return { ...state, store, service, render };
+};
+
+describe('daily creation carry-forward', () => {
+	it('moves whole unfinished task trees after template items while preserving completed trees and surrounding Markdown', async () => {
+		const template = carryTemplate.replace(/\n/g, '\r\n');
+		const state = await carryFixture(template);
+		const openTree =
+			'- [ ] Open parent ^open\r\n  continuation **body**\r\n  - [x] Checked child ^checked-child\r\n\t- [ ] Open child ^open-child\r\n';
+		const checkedParentTree =
+			'- [x] Checked parent ^checked-parent\r\n  - [ ] Unfinished child ^unfinished-child\r\n    detail ^detail\r\n';
+		const before = [
+			'---\r\nexample: "- [ ] YAML text"\r\n---\r\n# Previous day\r\n### Plan\r\nIntro.\r\n',
+			openTree,
+			'- [x] Finished parent ^finished\r\n  - [x] Finished child ^finished-child\r\n',
+			checkedParentTree,
+			'### Notes\r\nKeep narrative.\r\n```md\r\n- [ ] Fenced example\r\n```\r\n',
+		].join('');
+		state.vault.files.set(dailyPath, before);
+		await state.service.create(nextDay);
+		expect(state.vault.files.get(dailyPath)).toBe(
+			before.replace(openTree, '').replace(checkedParentTree, ''),
+		);
+		expect(state.vault.files.get(nextDailyPath)).toBe(
+			template.replace('### Notes', `${openTree}${checkedParentTree}### Notes`),
+		);
+		expect(state.links()).toEqual([]);
+	});
+
+	it('relocates only selected daily source and copy endpoints and keeps edits and checking synchronized in both directions', async () => {
+		const state = await carryFixture();
+		const peerDay = '2026-10-20';
+		const peerPath = 'Daily/2026/10/2026-10-20.md';
+		const project =
+			'---\ntavern: project\n---\n## Work\n- [ ] Project source ^project-source\n- [x] Completed source ^completed-source\n';
+		const peer = '### Plan\n- [ ] Daily origin ^origin-peer\n';
+		state.vault.files.set(sourcePath, project);
+		state.vault.files.set(peerPath, peer);
+		state.vault.files.set(
+			dailyPath,
+			'### Plan\n- [ ] Standalone\n- [ ] Daily copy ^daily-copy\n- [ ] Daily origin ^daily-origin\n- [x] Completed copy ^completed-copy\n',
+		);
+		const links: DailyTaskLink[] = [
+			{
+				source: { path: sourcePath, blockId: 'project-source' },
+				copies: [{ path: dailyPath, blockId: 'daily-copy' }],
+				checked: false,
+			},
+			{
+				source: { path: dailyPath, blockId: 'daily-origin' },
+				copies: [{ path: peerPath, blockId: 'origin-peer' }],
+				checked: false,
+			},
+			{
+				source: { path: sourcePath, blockId: 'completed-source' },
+				copies: [{ path: dailyPath, blockId: 'completed-copy' }],
+				checked: true,
+			},
+		];
+		await state.options.saveLinks(links);
+		await state.service.create(nextDay);
+		expect(state.vault.files.get(sourcePath)).toBe(project);
+		expect(state.vault.files.get(peerPath)).toBe(peer);
+		expect(state.vault.files.get(dailyPath)).toBe(
+			'### Plan\n- [x] Completed copy ^completed-copy\n',
+		);
+		expect(state.links()).toEqual([
+			{ ...links[0], copies: [{ path: nextDailyPath, blockId: 'daily-copy' }] },
+			{ ...links[1], source: { path: nextDailyPath, blockId: 'daily-origin' } },
+			links[2],
+		]);
+		await state.service.editTask(nextDay, 'block:daily-copy', 'Edited from new day');
+		expect(state.tasks().find((task) => task.blockId === 'project-source')!.text).toBe(
+			'Edited from new day',
+		);
+		await state.service.editProjectTaskPlan(
+			state.tasks().find((task) => task.blockId === 'project-source')!,
+			{ text: 'Edited from project', children: [], siblings: [] },
+		);
+		expect(state.vault.files.get(nextDailyPath)).toContain('Edited from project ^daily-copy');
+		await state.service.setTaskChecked(nextDay, 'block:daily-copy', true);
+		expect(state.tasks().find((task) => task.blockId === 'project-source')!.checked).toBe(true);
+		await state.service.setProjectTaskChecked(
+			state.tasks().find((task) => task.blockId === 'project-source')!,
+			false,
+		);
+		expect(state.vault.files.get(nextDailyPath)).toContain('- [ ] Edited from project ^daily-copy');
+		await state.service.editTask(nextDay, 'block:daily-origin', 'Edited origin');
+		expect(state.vault.files.get(peerPath)).toContain('Edited origin ^origin-peer');
+		await state.service.editTask(peerDay, 'block:origin-peer', 'Edited peer');
+		expect(state.vault.files.get(nextDailyPath)).toContain('Edited peer ^daily-origin');
+		await state.service.setTaskChecked(peerDay, 'block:origin-peer', true);
+		expect(state.vault.files.get(nextDailyPath)).toContain('- [x] Edited peer ^daily-origin');
+		await state.service.setTaskChecked(nextDay, 'block:daily-origin', false);
+		expect(state.vault.files.get(peerPath)).toContain('- [ ] Edited peer ^origin-peer');
+	});
+
+	it('leaves a destination created by another writer untouched when the creator reports no ownership', async () => {
+		const state = await carryFixture();
+		const previous = '### Plan\n- [ ] Previous work ^previous\n';
+		state.vault.files.set(dailyPath, previous);
+		state.render.mockImplementationOnce(async (path) => {
+			state.vault.files.set(path, 'Another writer created this note.\n');
+			return false;
+		});
+		const modify = vi.spyOn(state.vault, 'modify');
+		await state.service.create(nextDay);
+		expect(state.vault.files.get(nextDailyPath)).toBe('Another writer created this note.\n');
+		expect(state.vault.files.get(dailyPath)).toBe(previous);
+		expect(modify).not.toHaveBeenCalled();
+	});
+
+	it.each(['missing previous day', 'existing destination', 'template failure'] as const)(
+		'leaves older work untouched for %s',
+		async (scenario) => {
+			const state = await carryFixture();
+			const previous = '### Plan\n- [ ] Yesterday ^yesterday\n';
+			const olderPath = 'Daily/2026/10/2026-10-23.md';
+			const older = '### Plan\n- [ ] Older work ^older\n';
+			state.vault.files.set(dailyPath, previous);
+			state.vault.files.set(olderPath, older);
+			if (scenario === 'missing previous day') {
+				state.vault.files.delete(dailyPath);
+			}
+			if (scenario === 'existing destination') {
+				state.vault.files.set(nextDailyPath, 'Existing note.\n');
+			}
+			if (scenario === 'template failure') {
+				state.render.mockRejectedValueOnce(new Error('Templater failed.'));
+				await expect(state.service.create(nextDay)).rejects.toThrow('Templater failed');
+				expect(state.vault.files.has(nextDailyPath)).toBe(false);
+			} else {
+				await state.service.create(nextDay);
+				expect(state.vault.files.get(nextDailyPath)).toBe(
+					scenario === 'existing destination' ? 'Existing note.\n' : carryTemplate,
+				);
+			}
+			expect(state.vault.files.get(olderPath)).toBe(older);
+			expect(state.vault.files.get(dailyPath)).toBe(
+				scenario === 'missing previous day' ? undefined : previous,
+			);
+			if (scenario === 'existing destination') {
+				expect(state.render).not.toHaveBeenCalled();
+			}
+			expect(state.links()).toEqual([]);
+		},
+	);
+
+	it.each(['task', 'prose'] as const)(
+		'rejects a destination %s block collision before changing notes or relations',
+		async (kind) => {
+			const template = carryTemplate.replace(
+				'### Notes',
+				`${kind === 'task' ? '- [ ] Collision' : 'A paragraph'} ^collision\n### Notes`,
+			);
+			const state = await carryFixture(template);
+			const previous = '### Plan\n- [ ] First ^first\n- [ ] Second ^collision\n';
+			state.vault.files.set(dailyPath, previous);
+			const modify = vi.spyOn(state.vault, 'modify');
+			const save = vi.spyOn(state.options, 'saveLinks');
+			await expect(state.service.create(nextDay)).rejects.toThrow('already exists');
+			expect(state.vault.files.get(dailyPath)).toBe(previous);
+			expect(state.vault.files.get(nextDailyPath)).toBe(template);
+			expect(modify).not.toHaveBeenCalled();
+			expect(save).not.toHaveBeenCalled();
+			expect(state.links()).toEqual([]);
+		},
+	);
+
+	it.each([
+		'ambiguous selected block',
+		'missing peer note',
+		'missing peer block',
+		'ambiguous peer block',
+	] as const)('preflights every selected tree and linked counterpart with %s', async (invalid) => {
+		const state = await carryFixture();
+		let previous =
+			'### Plan\n- [ ] First ^first\n- [x] Parent ^parent\n  - [ ] Linked child ^child\n';
+		if (invalid === 'ambiguous selected block') {
+			previous += 'Conflicting paragraph ^child\n';
+		}
+		state.vault.files.set(dailyPath, previous);
+		state.vault.files.set(sourcePath, '- [ ] Peer ^peer\n');
+		const otherPath = 'Other.md';
+		if (invalid !== 'missing peer note') {
+			state.vault.files.set(
+				otherPath,
+				invalid === 'missing peer block'
+					? '- [ ] Missing ^other\n'
+					: `- [ ] Other peer ^other-peer\n${invalid === 'ambiguous peer block' ? 'Conflicting paragraph ^other-peer\n' : ''}`,
+			);
+		}
+		const links: DailyTaskLink[] = [
+			{
+				source: { path: sourcePath, blockId: 'peer' },
+				copies: [
+					{ path: dailyPath, blockId: 'child' },
+					{ path: otherPath, blockId: 'other-peer' },
+				],
+				checked: false,
+			},
+		];
+		await state.options.saveLinks(links);
+		const before = new Map(state.vault.files);
+		const modify = vi.spyOn(state.vault, 'modify');
+		const save = vi.spyOn(state.options, 'saveLinks');
+		await expect(state.service.create(nextDay)).rejects.toThrow(
+			invalid === 'missing peer note' ? 'Linked note was not found' : 'missing or ambiguous',
+		);
+		expect(state.vault.files).toEqual(new Map([...before, [nextDailyPath, carryTemplate]]));
+		expect(state.links()).toEqual(links);
+		expect(modify).not.toHaveBeenCalled();
+		expect(save).not.toHaveBeenCalled();
+	});
+
+	it.each(['settings', 'destination write', 'previous write'] as const)(
+		'restores the template baseline and previous work after a failed %s',
+		async (failure) => {
+			const state = await carryFixture();
+			const previous = '### Plan\n- [ ] Linked work ^daily-copy\n';
+			state.vault.files.set(dailyPath, previous);
+			const links: DailyTaskLink[] = [
+				{
+					source: { path: sourcePath, blockId: 'project-source' },
+					copies: [{ path: dailyPath, blockId: 'daily-copy' }],
+					checked: false,
+				},
+			];
+			state.vault.files.set(sourcePath, '- [ ] Project work ^project-source\n');
+			await state.options.saveLinks(links);
+			const before = new Map(state.vault.files);
+			const modify = vi.spyOn(state.vault, 'modify');
+			if (failure === 'settings') {
+				vi.spyOn(state.options, 'saveLinks').mockRejectedValueOnce(new Error('Settings failed.'));
+			} else {
+				state.vault.failWritePath = failure === 'destination write' ? nextDailyPath : dailyPath;
+			}
+			await expect(state.service.create(nextDay)).rejects.toThrow(
+				failure === 'settings' ? 'Settings failed' : 'Disk write failed',
+			);
+			expect(state.vault.files).toEqual(new Map([...before, [nextDailyPath, carryTemplate]]));
+			expect(state.links()).toEqual(links);
+			if (failure === 'settings') {
+				expect(modify).not.toHaveBeenCalled();
+			} else {
+				expect(modify.mock.calls.map(([file]) => file.path)).toEqual(
+					failure === 'destination write'
+						? [nextDailyPath]
+						: [nextDailyPath, dailyPath, nextDailyPath],
+				);
+			}
+		},
+	);
+});
