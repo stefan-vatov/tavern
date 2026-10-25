@@ -53,6 +53,12 @@ actual and expected paths; do not silently create a second note or reverse
 arbitrary script effects. Tavern does not promise to roll back template scripts
 or await independent asynchronous callbacks they schedule.
 
+Captain's Log hides the `Notes` heading and its section contents, including
+nested headings, until the next heading at the same or higher level. This is
+a presentation rule; the underlying Markdown remains intact. Its permanent
+add-task field sits below the visible list with clear spacing and follows the
+[shared task-editing contract](task-editing.md).
+
 Daily-task changes preserve surrounding note content and operate on the current
 Markdown. Blank task
 creation is rejected. Keyboard entry and cleared-row cleanup follow the

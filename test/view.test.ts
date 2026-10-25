@@ -64,6 +64,12 @@ class FakeStyle {
 	setProperty(name: string, value: string): void {
 		this.values.set(name, value);
 	}
+
+	removeProperty(name: string): string {
+		const value = this.getPropertyValue(name);
+		this.values.delete(name);
+		return value;
+	}
 }
 
 class FakeElement {
@@ -79,6 +85,7 @@ class FakeElement {
 	children: FakeElement[] = [];
 	classes = new Set<string>();
 	disabled = false;
+	readOnly = false;
 	draggable = false;
 	focused = false;
 	listeners = new Map<string, Listener[]>();
@@ -212,6 +219,13 @@ class FakeElement {
 		const index = parent.children.indexOf(this);
 		element.parent = parent;
 		parent.children.splice(index + 1, 0, element);
+	}
+
+	appendChild(element: FakeElement): FakeElement {
+		element.remove();
+		element.parent = this;
+		this.children.push(element);
+		return element;
 	}
 
 	getBoundingClientRect(): Pick<DOMRect, 'height' | 'left' | 'top'> {
@@ -1820,7 +1834,7 @@ tavern: project
 		expect(vault.modify).not.toHaveBeenCalled();
 	});
 
-	it('should capture a project task on blur and ignore plain Enter and blank task creation', async () => {
+	it('captures project tasks immediately and retains the next draft through a background refresh', async () => {
 		const files = {
 			'04_Projects/Pi.md': PROJECT_MARKDOWN,
 		};
@@ -1844,8 +1858,13 @@ tavern: project
 		input.focus();
 		input.value = '   ';
 		input.dispatch('keydown', { key: 'Enter', preventDefault: vi.fn(), stopPropagation: vi.fn() });
+		input.dispatch('blur');
+		await view.refreshProjects();
 		expect(vault.modify).not.toHaveBeenCalled();
+		expect(findByAriaLabel(rootElements.at(-1)!, 'Add task to Backlog')).toBe(input);
+		expect(input.parent!.style.getPropertyValue('display')).toBe('');
 
+		input.focus();
 		input.value = 'Capture keyboard task';
 		input.dispatch('keydown', { key: 'Escape', preventDefault: vi.fn(), stopPropagation: vi.fn() });
 		expect(vault.modify).not.toHaveBeenCalled();
@@ -1855,14 +1874,35 @@ tavern: project
 		expect(input.value).toBe('');
 		input.value = 'Capture keyboard task';
 		input.dispatch('input');
-		input.dispatch('keydown', { key: 'Enter', ctrlKey: true });
-		const draft = fakeDocument.activeElement!;
-		expect(draft).not.toBe(input);
-		expect(vault.modify).not.toHaveBeenCalled();
-		draft.dispatch('blur');
+		input.dispatch('keydown', { key: 'Enter' });
 		await vi.waitFor(() => expect(vault.modify).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() => expect(input.value).toBe(''));
+		await vi.waitFor(() =>
+			expect(findByAriaLabel(rootElements.at(-1)!, 'Edit Capture keyboard task')).toBeDefined(),
+		);
 
 		expect(files['04_Projects/Pi.md']).toContain('- [ ] Build board\n- [ ] Capture keyboard task');
+		expect(findByAriaLabel(rootElements.at(-1)!, 'Add task to Backlog')).toBe(input);
+		expect(fakeDocument.activeElement).toBe(input);
+		input.value = 'Next task while reviewing';
+		input.dispatch('input');
+		files['04_Projects/Pi.md'] = files['04_Projects/Pi.md'].replace(
+			'## Done',
+			'- [ ] Background project task\n\n## Done',
+		);
+		await view.refreshProjects();
+		expect(findByAriaLabel(rootElements.at(-1)!, 'Edit Background project task')).toBeDefined();
+		expect(findByAriaLabel(rootElements.at(-1)!, 'Add task to Backlog')).toBe(input);
+		expect(fakeDocument.activeElement).toBe(input);
+		expect(input.value).toBe('Next task while reviewing');
+		input.dispatch('keydown', { key: 'Enter', ctrlKey: true });
+		await vi.waitFor(() => expect(vault.modify).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(input.value).toBe(''));
+		expect(files['04_Projects/Pi.md']).toContain(
+			'- [ ] Background project task\n- [ ] Next task while reviewing',
+		);
+		expect(files['04_Projects/Pi.md'].match(/- \[ \] Capture keyboard task/gu)).toHaveLength(1);
+		expect(files['04_Projects/Pi.md']).not.toMatch(/^- \[ \]\s*$/mu);
 	});
 
 	it('keeps a failed project capture available to retry', async () => {
@@ -1880,13 +1920,66 @@ tavern: project
 		const input = findByAriaLabel(root, 'Add task to Backlog')!;
 		input.focus();
 		input.value = 'Keep my capture';
-		input.dispatch('blur');
+		input.dispatch('input');
+		input.dispatch('keydown', { key: 'Enter' });
 		await vi.waitFor(() => expect(Notice).toHaveBeenCalledWith('Tavern could not add the task.'));
 		expect(input.value).toBe('Keep my capture');
+		expect(input.readOnly).toBe(false);
+		expect(fakeDocument.activeElement).toBe(input);
+		expect(findByAriaLabel(root, 'Add task to Backlog')).toBe(input);
+		expect(files['04_Projects/Pi.md']).toBe(PROJECT_MARKDOWN);
+		input.dispatch('keydown', { key: 'Enter' });
+		await vi.waitFor(() => expect(files['04_Projects/Pi.md']).toContain('- [ ] Keep my capture'));
+	});
+
+	it('keeps a pending project capture visible through navigation and a failed write until retry succeeds', async () => {
+		const { Notice } = await import('obsidian');
+		const files = {
+			'04_Projects/Pi.md': PROJECT_MARKDOWN,
+			'04_Projects/Blogging.md': OTHER_MARKDOWN,
+		};
+		const vault = createVault(files);
+		let rejectCapture: (error: Error) => void = () => {
+			throw new Error('Capture did not start.');
+		};
+		// eslint-disable-next-line promise/avoid-new
+		const pending = new Promise<void>((_resolve, reject) => {
+			rejectCapture = reject;
+		});
+		vault.modify.mockImplementationOnce(() => pending);
+		const view = new TavernView({} as never, {
+			saveSettings: vi.fn(),
+			settings: { boardTaskKeys: [], projectFolders: ['04_Projects'], tavernName: 'Tavern' },
+			vault,
+		});
+		await view.setState({ mode: 'note', selectedPath: '04_Projects/Pi.md' }, { history: false });
+		const root = rootElements.at(-1)!;
+		const input = findByAriaLabel(root, 'Add task to Backlog')!;
+		input.focus();
+		input.value = 'Retain this Pi capture';
+		input.dispatch('input');
+		input.dispatch('keydown', { key: 'Enter' });
+		await vi.waitFor(() => expect(vault.modify).toHaveBeenCalledOnce());
+		expect(input.readOnly).toBe(true);
+		findByText(root, 'Blogging')!.parent!.parent!.dispatch('click');
+		expect(findByAriaLabel(root, 'Add task to Backlog')).toBe(input);
+		expect(findByAriaLabel(root, 'Edit Build board')).toBeDefined();
+		expect(findByAriaLabel(root, 'Edit Draft post')).toBeUndefined();
+		expect(input.value).toBe('Retain this Pi capture');
+		rejectCapture(new Error('Write failed after navigation'));
+		await vi.waitFor(() => expect(Notice).toHaveBeenCalledWith('Tavern could not add the task.'));
+		await vi.waitFor(() => expect(input.readOnly).toBe(false));
+		expect(findByAriaLabel(root, 'Add task to Backlog')).toBe(input);
+		expect(input.value).toBe('Retain this Pi capture');
 		expect(files['04_Projects/Pi.md']).toBe(PROJECT_MARKDOWN);
 		input.focus();
-		input.dispatch('blur');
-		await vi.waitFor(() => expect(files['04_Projects/Pi.md']).toContain('- [ ] Keep my capture'));
+		input.dispatch('keydown', { key: 'Enter' });
+		await vi.waitFor(() =>
+			expect(files['04_Projects/Pi.md']).toContain('- [ ] Retain this Pi capture'),
+		);
+		await vi.waitFor(() => expect(findByAriaLabel(root, 'Edit Draft post')).toBeDefined());
+		expect(files['04_Projects/Blogging.md']).toBe(OTHER_MARKDOWN);
+		expect(vault.modify).toHaveBeenCalledTimes(2);
 	});
 
 	it('persists a Ctrl and Shift task chain in one write after focus leaves the editor', async () => {
@@ -3959,13 +4052,21 @@ tavern: project
 			await vi.waitFor(() => expect(controller.read).toHaveBeenLastCalledWith('2026-10-25'));
 		});
 
-		it('renders narrative and nested tasks, then routes editing, checking and capture to the selected log', async () => {
-			const controller = createDailyController();
+		it('hides the Notes subtree, renders later sections and retains capture while the log refreshes', async () => {
+			const markdown = `${DAILY_MARKDOWN}#### Private detail\nHidden notes detail.\n- [ ] Hidden note task ^private\n### Later\nVisible later narrative.\n- [ ] Later task ^later\n`;
+			const controller = createDailyController(markdown);
 			const view = dailyView(controller);
 			await view.onOpen();
 			const root = rootElements.at(-1)!;
 			await vi.waitFor(() => expect(findByAriaLabel(root, 'Edit Review log')).toBeDefined());
-			expect(textValues(root)).toContain('Keep the narrative.');
+			expect(textValues(root)).not.toContain('Notes');
+			expect(textValues(root)).not.toContain('Keep the narrative.');
+			expect(textValues(root)).not.toContain('Private detail');
+			expect(textValues(root)).not.toContain('Hidden notes detail.');
+			expect(findByAriaLabel(root, 'Mark Hidden note task complete')).toBeUndefined();
+			expect(textValues(root)).toContain('Later');
+			expect(textValues(root)).toContain('Visible later narrative.');
+			expect(findByAriaLabel(root, 'Mark Later task complete')).toBeDefined();
 			const child = findByAriaLabel(root, 'Mark Follow up complete')!.parent!;
 			expect(child.style.getPropertyValue('--tavern-task-depth')).toBe('1');
 			findByAriaLabel(root, 'Edit Review log')!.dispatch('click');
@@ -3990,7 +4091,8 @@ tavern: project
 			const add = findByAriaLabel(root, 'Add todo')!;
 			add.focus();
 			add.value = 'Capture the next step';
-			add.dispatch('blur');
+			add.dispatch('input');
+			add.dispatch('keydown', { key: 'Enter', shiftKey: true });
 			await vi.waitFor(() =>
 				expect(controller.addTaskPlan).toHaveBeenCalledWith('2026-10-24', {
 					text: 'Capture the next step',
@@ -3998,6 +4100,24 @@ tavern: project
 					siblings: [],
 				}),
 			);
+			await vi.waitFor(() => expect(add.value).toBe(''));
+			expect(findByAriaLabel(root, 'Add todo')).toBe(add);
+			expect(fakeDocument.activeElement).toBe(add);
+			add.value = 'Next log task';
+			add.dispatch('input');
+			controller.read.mockResolvedValue({
+				day: '2026-10-24',
+				path: 'logs/2026-10-24.md',
+				note: parseDailyNote(markdown.replace('### Notes', '- [ ] Background log task\n### Notes')),
+			});
+			await view.refreshProjects();
+			await vi.waitFor(() =>
+				expect(findByAriaLabel(root, 'Mark Background log task complete')).toBeDefined(),
+			);
+			expect(findByAriaLabel(root, 'Add todo')).toBe(add);
+			expect(fakeDocument.activeElement).toBe(add);
+			expect(add.value).toBe('Next log task');
+			expect(controller.addTaskPlan).toHaveBeenCalledOnce();
 		});
 
 		it.each(['project', 'focus'])(
@@ -4389,9 +4509,11 @@ tavern: project
 			const root = rootElements.at(-1)!;
 			await vi.waitFor(() => expect(findByAriaLabel(root, 'Add todo')).toBeDefined());
 			const input = findByAriaLabel(root, 'Add todo')!;
+			input.focus();
 			input.value = '   ';
 			input.dispatch('keydown', { key: 'Enter' });
 			input.value = 'Still composing';
+			input.dispatch('input');
 			input.dispatch('keydown', { key: 'a' });
 			input.dispatch('keydown', { key: 'Enter', isComposing: true });
 			expect(controller.addTaskPlan).not.toHaveBeenCalled();
@@ -4421,18 +4543,14 @@ tavern: project
 				await vi.waitFor(() => expect(findByAriaLabel(root, 'Add todo')).toBeDefined());
 				const input = findByAriaLabel(root, 'Add todo')!;
 				input.focus();
+				input.value = 'Capture before closing';
+				input.dispatch('input');
 				input.dispatch('keydown', { key: 'Enter', shiftKey: true });
-				const child = fakeDocument.activeElement!;
-				child.value = 'Capture before closing';
-				child.dispatch('keydown', { key: 'Enter', shiftKey: true });
-				fakeDocument.activeElement!.value = 'Nested detail';
-				child.focus();
-				child.dispatch('keydown', { key: 'Enter', ctrlKey: true });
-				const sibling = fakeDocument.activeElement!;
-				sibling.value = 'Next capture';
-				sibling.dispatch('blur');
-				await vi.waitFor(() => expect(input.disabled).toBe(true));
+				await vi.waitFor(() => expect(input.readOnly).toBe(true));
+				expect(fakeDocument.activeElement).toBe(input);
 				await view.onClose();
+				const outside = new FakeElement('button');
+				outside.focus();
 				const refresh = vi.spyOn(view, 'refreshProjects');
 				const noticesAtClose = vi.mocked(Notice).mock.calls.length;
 				const readsAtClose = controller.read.mock.calls.length;
@@ -4447,12 +4565,11 @@ tavern: project
 					await vi.waitFor(() => expect(modalRoots).toHaveLength(1));
 					const recovery = findByAriaLabel(modalRoots[0]!, 'Unsaved task edits')!;
 					expect(recovery.tag).toBe('textarea');
-					expect(recovery.value).toBe(
-						'- [ ] Capture before closing\n  - [ ] Nested detail\n- [ ] Next capture',
-					);
+					expect(recovery.value).toBe('- [ ] Capture before closing');
 					expect(fakeDocument.activeElement).toBe(recovery);
 				} else {
 					expect(modalRoots).toHaveLength(0);
+					expect(fakeDocument.activeElement).toBe(outside);
 				}
 			},
 		);

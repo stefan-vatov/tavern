@@ -58,6 +58,8 @@ class DailyLogPane extends Component {
 	private contentEvents: Component;
 	private readonly header: HTMLElement;
 	private readonly content: HTMLElement;
+	private readonly itemsEl: HTMLElement;
+	private captureRow: HTMLElement | undefined;
 
 	constructor(
 		container: HTMLElement,
@@ -92,6 +94,7 @@ class DailyLogPane extends Component {
 			this.renderContent();
 		});
 		this.content = container.createDiv('tavern-daily-content');
+		this.itemsEl = this.content.createDiv('tavern-daily-items');
 		this.renderHeader();
 		this.registerDrop(this.content, undefined, this);
 		this.register(() => {
@@ -169,7 +172,8 @@ class DailyLogPane extends Component {
 		this.notePath = '';
 		this.publishState();
 		this.renderHeader();
-		this.content.empty();
+		this.itemsEl.empty();
+		this.captureRow?.style.setProperty('display', 'none');
 		this.renderedLayout = '';
 		await this.refresh();
 	}
@@ -184,9 +188,21 @@ class DailyLogPane extends Component {
 			}
 			return;
 		}
+		let hiddenNotesLevel: number | undefined = undefined;
+		const items = this.note?.items.filter((item) => {
+			if (item.type === 'heading') {
+				if (hiddenNotesLevel !== undefined && item.level <= hiddenNotesLevel) {
+					hiddenNotesLevel = undefined;
+				}
+				if (item.text.trim().toLowerCase() === 'notes') {
+					hiddenNotesLevel ??= item.level;
+				}
+			}
+			return hiddenNotesLevel === undefined;
+		});
 		const layout = JSON.stringify({
 			query: this.query,
-			items: this.note?.items.map((item) => {
+			items: items?.map((item) => {
 				if (item.type === 'task') {
 					return { ...item, task: { ...item.task, checked: false } };
 				}
@@ -204,10 +220,11 @@ class DailyLogPane extends Component {
 		this.renderedTaskReferences.clear();
 		this.removeChild(this.contentEvents);
 		this.contentEvents = this.addChild(new Component());
-		this.content.empty();
+		this.itemsEl.empty();
 		if (!this.note) {
-			this.content.createEl('p', { cls: 'tavern-daily-empty', text: 'No note' });
-			const create = this.content.createEl('button', {
+			this.captureRow?.style.setProperty('display', 'none');
+			this.itemsEl.createEl('p', { cls: 'tavern-daily-empty', text: 'No note' });
+			const create = this.itemsEl.createEl('button', {
 				cls: 'tavern-daily-create',
 				text: 'Create daily log',
 			});
@@ -219,19 +236,12 @@ class DailyLogPane extends Component {
 			return;
 		}
 		const visible = new Set(filterTasks(this.note.tasks, this.query).map((task) => task.id));
-		const firstSection = this.note.items
+		const firstSection = items!
 			.filter((item) => item.type === 'heading')
 			.find((item) => item.level === 2);
-		let addRendered = false;
-		let inPlan = false;
-		for (const item of this.note.items) {
+		for (const item of items!) {
 			if (item.type === 'heading') {
-				if (inPlan && item.level <= 3 && !addRendered) {
-					this.renderAddTask();
-					addRendered = true;
-				}
-				inPlan = item.text === 'Plan';
-				this.content.createEl(`h${item.level}` as 'h2', {
+				this.itemsEl.createEl(`h${item.level}` as 'h2', {
 					cls: `tavern-daily-heading is-level-${item.level}`,
 					text: item.text,
 				});
@@ -240,16 +250,19 @@ class DailyLogPane extends Component {
 					this.renderTask(item.task);
 				}
 			} else if (item.raw.trim() && (!firstSection || item.lineIndex > firstSection.lineIndex)) {
-				this.content.createDiv({ cls: 'tavern-daily-text', text: item.raw });
+				this.itemsEl.createDiv({ cls: 'tavern-daily-text', text: item.raw });
 			}
 		}
-		if (!addRendered) {
-			this.renderAddTask();
-		}
+		this.renderAddTask();
 	}
 
 	private renderAddTask(): void {
+		if (this.captureRow) {
+			this.captureRow.style.removeProperty('display');
+			return;
+		}
 		const row = this.content.createDiv('tavern-daily-add-task');
+		this.captureRow = row;
 		const input = row.createEl('input', {
 			cls: 'tavern-add-task-input',
 			attr: { placeholder: 'Add a todo...', 'aria-label': 'Add todo' },
@@ -270,7 +283,7 @@ class DailyLogPane extends Component {
 	}
 
 	private renderTask(task: DailyTask): void {
-		const row = this.content.createDiv('tavern-daily-task tavern-project-task');
+		const row = this.itemsEl.createDiv('tavern-daily-task tavern-project-task');
 		const reference = { day: this.day, id: task.id };
 		this.renderedTaskReferences.add(reference);
 		this.contentEvents.registerDomEvent(row, 'contextmenu', (event) => {

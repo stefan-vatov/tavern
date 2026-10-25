@@ -109,6 +109,11 @@ class TavernView extends ItemView {
 	private sidebarOpen = false;
 	private closed = false;
 	private readonly activeEditors = new Set<TaskTextEditor>();
+	private readonly captureEditors = new Set<TaskTextEditor>();
+	private readonly projectCaptures = new Map<
+		string,
+		{ form: HTMLElement; input: HTMLInputElement; editor: TaskTextEditor }
+	>();
 	private readonly pendingTaskReferences = new Set<{ projectPath: string; id: string }>();
 	private contextMenuTask: { projectPath: string; id: string } | undefined;
 	private readonly renderedTaskReferences = new Map<HTMLElement, ProjectBoardTask>();
@@ -174,6 +179,11 @@ class TavernView extends ItemView {
 			editor.dispose();
 		}
 		this.activeEditors.clear();
+		for (const editor of this.captureEditors) {
+			editor.dispose();
+		}
+		this.captureEditors.clear();
+		this.projectCaptures.clear();
 		this.popTaskEditingScope();
 		if (this.dailyPane) {
 			this.removeChild(this.dailyPane);
@@ -247,7 +257,7 @@ class TavernView extends ItemView {
 		if (this.closed) {
 			return;
 		}
-		if (this.activeEditors.size > 0) {
+		if (this.hasInlineEditors()) {
 			await this.dailyPane?.refresh();
 			return;
 		}
@@ -262,11 +272,15 @@ class TavernView extends ItemView {
 			return;
 		}
 
-		if (this.activeEditors.size > 0) {
+		if (this.hasInlineEditors()) {
 			return;
 		}
 
 		if (Exit.isFailure(exit)) {
+			if (this.activeEditors.size > 0) {
+				new Notice('Tavern could not load project notes.');
+				return;
+			}
 			this.library = EMPTY_LIBRARY;
 			this.errorMessage = 'Tavern could not load project notes.';
 			this.loading = false;
@@ -317,7 +331,7 @@ class TavernView extends ItemView {
 		if (this.closed) {
 			return;
 		}
-		if (this.activeEditors.size > 0) {
+		if (this.hasInlineEditors()) {
 			return;
 		}
 		this.dragCleanup?.();
@@ -375,7 +389,7 @@ class TavernView extends ItemView {
 					}
 					return this.taskFromSelectionKey(key);
 				},
-				isEditing: () => this.activeEditors.size > 0,
+				isEditing: () => this.hasInlineEditors(),
 				finishEditing: async () => {
 					await this.finishTaskEditing();
 					await this.taskMutationQueue;
@@ -726,31 +740,60 @@ class TavernView extends ItemView {
 	}
 
 	private renderDetail(containerEl: HTMLElement): void {
-		if (this.activeEditors.size > 0) {
+		if (this.hasInlineEditors()) {
 			return;
 		}
-		containerEl.empty();
-		containerEl.addClass('tavern-detail');
-
-		if (this.errorMessage) {
-			containerEl.createDiv({ cls: 'tavern-detail-empty', text: this.errorMessage });
+		let project: ProjectSummary | undefined = undefined;
+		if (this.boardPage === 'project') {
+			project = this.boardModel().selectedProject;
+		}
+		const captureKeys = new Set(
+			project?.note.sections.map((section) => JSON.stringify([project!.path, section.name])),
+		);
+		if (
+			[...this.projectCaptures].some(
+				([key, capture]) => this.activeEditors.has(capture.editor) && !captureKeys.has(key),
+			)
+		) {
 			return;
 		}
+		const focused = [...this.projectCaptures.values()].find(
+			({ input }) => input.ownerDocument.activeElement === input,
+		)?.input;
+		try {
+			containerEl.empty();
+			containerEl.addClass('tavern-detail');
 
-		if (this.boardPage === 'global') {
-			this.renderGlobalWorkQueue(containerEl);
-			return;
+			if (this.errorMessage) {
+				containerEl.createDiv({ cls: 'tavern-detail-empty', text: this.errorMessage });
+				return;
+			}
+
+			if (this.boardPage === 'global') {
+				this.renderGlobalWorkQueue(containerEl);
+				return;
+			}
+
+			if (!project) {
+				containerEl.createDiv({ cls: 'tavern-detail-empty', text: 'Select a project note.' });
+				return;
+			}
+
+			const toolbar = containerEl.createDiv('tavern-detail-toolbar');
+			this.renderDetailToolbar(toolbar, project);
+			this.renderProjectLists(containerEl, project);
+		} finally {
+			for (const [key, capture] of this.projectCaptures) {
+				if (!containerEl.contains(capture.form)) {
+					this.projectCaptures.delete(key);
+					this.captureEditors.delete(capture.editor);
+					capture.editor.dispose();
+				}
+			}
+			if (focused && containerEl.contains(focused)) {
+				focused.focus({ preventScroll: true });
+			}
 		}
-
-		const project = this.boardModel().selectedProject;
-		if (!project) {
-			containerEl.createDiv({ cls: 'tavern-detail-empty', text: 'Select a project note.' });
-			return;
-		}
-
-		const toolbar = containerEl.createDiv('tavern-detail-toolbar');
-		this.renderDetailToolbar(toolbar, project);
-		this.renderProjectLists(containerEl, project);
 	}
 
 	private selectedProject(): ProjectSummary | undefined {
@@ -962,6 +1005,12 @@ class TavernView extends ItemView {
 		project: ProjectSummary,
 		sectionName: string,
 	): void {
+		const key = JSON.stringify([project.path, sectionName]);
+		const capture = this.projectCaptures.get(key);
+		if (capture) {
+			containerEl.appendChild(capture.form);
+			return;
+		}
 		const form = containerEl.createDiv('tavern-add-task');
 		const input = form.createEl('input', {
 			attr: { 'aria-label': `Add task to ${sectionName}` },
@@ -1003,6 +1052,7 @@ class TavernView extends ItemView {
 				throw error;
 			}
 		});
+		this.projectCaptures.set(key, { form, input, editor });
 		this.registerDomEvent(button, 'mousedown', (event) => event.preventDefault());
 		this.registerDomEvent(button, 'click', async (event) => {
 			event.preventDefault();
@@ -1295,11 +1345,13 @@ class TavernView extends ItemView {
 			text: '',
 			inputEl: input,
 			isNew: true,
+			isCapture: true,
 			renderText: () => {},
 			createDraftRow: (after, depth) => this.createTaskDraftRow(after, depth),
 			onCommit: (plan) => this.commitTaskEdit(plan, () => onCommit(plan)),
 			onEditingChange: (editing) => this.taskEditingChanged(editor, editing),
 		});
+		this.captureEditors.add(editor);
 		this.registerDomEvent(input, 'focus', () => editor.open());
 		this.registerDomEvent(input, 'input', () => editor.open());
 		this.register(() => editor.dispose());
@@ -1315,6 +1367,10 @@ class TavernView extends ItemView {
 			}
 			throw error;
 		}
+	}
+
+	private hasInlineEditors(): boolean {
+		return [...this.activeEditors].some((editor) => !this.captureEditors.has(editor));
 	}
 
 	private taskEditingChanged(editor: TaskTextEditor, editing: boolean): void {

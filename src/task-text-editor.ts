@@ -13,6 +13,7 @@ interface TaskTextEditorOptions extends TaskEditorRow {
 	getSubtreeEnd?(): HTMLElement;
 	inputEl?: HTMLInputElement;
 	isNew?: boolean;
+	isCapture?: boolean;
 	startEditing?: boolean;
 	renderText(containerEl: HTMLElement, text: string): void;
 	createDraftRow(afterRow: HTMLElement, depth: number): TaskEditorRow;
@@ -42,6 +43,7 @@ export function createTaskTextEditor(options: TaskTextEditorOptions): TaskTextEd
 	let siblings: DraftTask[] = [];
 	let saving: Promise<void> | undefined = undefined;
 	let disposed = false;
+	let editing = false;
 	let originalDisplay = '';
 	let subtreeEnd: HTMLElement | undefined = undefined;
 
@@ -68,6 +70,13 @@ export function createTaskTextEditor(options: TaskTextEditorOptions): TaskTextEd
 		options.renderText(options.containerEl, options.text || 'Untitled task');
 	};
 
+	const setEditing = (value: boolean) => {
+		if (editing !== value) {
+			editing = value;
+			options.onEditingChange?.(value);
+		}
+	};
+
 	const finish = (cancelled: boolean) => {
 		for (const task of allTasks()) {
 			if (task !== root) {
@@ -88,7 +97,7 @@ export function createTaskTextEditor(options: TaskTextEditorOptions): TaskTextEd
 		if (cancelled) {
 			options.onCancel?.();
 		}
-		options.onEditingChange?.(false);
+		setEditing(false);
 	};
 
 	const trees = (tasks: DraftTask[]): TaskEditTree[] =>
@@ -116,25 +125,45 @@ export function createTaskTextEditor(options: TaskTextEditorOptions): TaskTextEd
 			((options.isNew && !plan.text) ||
 				(!options.isNew && Boolean(plan.text) && plan.text === options.text.trim()))
 		) {
-			finish(false);
+			if (options.isCapture) {
+				root.input.value = '';
+				setEditing(false);
+			} else {
+				finish(false);
+			}
 			return Promise.resolve();
 		}
-		const pendingInputs = allTasks().map(({ input }) => ({ input, disabled: input.disabled }));
+		setEditing(true);
+		const pendingInputs = allTasks().map(({ input }) => ({
+			input,
+			disabled: input.disabled,
+			readOnly: input.readOnly,
+		}));
 		for (const { input } of pendingInputs) {
-			input.disabled = true;
+			if (options.isCapture) {
+				input.readOnly = true;
+			} else {
+				input.disabled = true;
+			}
 		}
 		saving = (async () => {
 			try {
 				await options.onCommit(plan);
 				if (!disposed) {
-					finish(false);
+					if (options.isCapture) {
+						root.input.value = '';
+						setEditing(false);
+					} else {
+						finish(false);
+					}
 				}
 			} catch (error) {
 				options.rowEl.style.setProperty('display', originalDisplay);
 				throw error;
 			} finally {
-				for (const { input, disabled } of pendingInputs) {
+				for (const { input, disabled, readOnly } of pendingInputs) {
 					input.disabled = disabled;
+					input.readOnly = readOnly;
 				}
 				saving = undefined;
 			}
@@ -160,7 +189,9 @@ export function createTaskTextEditor(options: TaskTextEditorOptions): TaskTextEd
 			return;
 		}
 		if (task === root) {
-			options.rowEl.style.setProperty('display', 'none');
+			if (!options.isCapture) {
+				options.rowEl.style.setProperty('display', 'none');
+			}
 			return;
 		}
 		const group = task.parent ? task.parent.children : siblings;
@@ -183,6 +214,14 @@ export function createTaskTextEditor(options: TaskTextEditorOptions): TaskTextEd
 		}
 		const lastChild = task.children[task.children.length - 1];
 		return lastChild ? lastRow(lastChild) : task.rowEl;
+	};
+
+	const submitCapture = async () => {
+		try {
+			await commit();
+		} catch {
+			// Keep the capture available after the caller reports the write failure.
+		}
 	};
 
 	const handleKeydown = (event: KeyboardEvent): boolean => {
@@ -211,7 +250,9 @@ export function createTaskTextEditor(options: TaskTextEditorOptions): TaskTextEd
 			return true;
 		}
 		event.preventDefault();
-		if (event.ctrlKey || event.shiftKey) {
+		if (options.isCapture) {
+			void submitCapture();
+		} else if (event.ctrlKey || event.shiftKey) {
 			addTask(task, Boolean(event.shiftKey && !event.ctrlKey));
 		}
 		return true;
@@ -220,6 +261,9 @@ export function createTaskTextEditor(options: TaskTextEditorOptions): TaskTextEd
 	const bindInput = (task: DraftTask) => {
 		listen(task.input, 'click', (event) => event.stopPropagation());
 		listen(task.input, 'input', () => {
+			if (options.isCapture) {
+				setEditing(Boolean(task.input.value.trim()));
+			}
 			if (task === root && task.input.value.trim()) {
 				options.rowEl.style.setProperty('display', originalDisplay);
 			}
@@ -291,7 +335,9 @@ export function createTaskTextEditor(options: TaskTextEditorOptions): TaskTextEd
 			});
 		root = { ...options, input, parent: undefined, depth: options.depth ?? 0, children: [] };
 		bindInput(root);
-		options.onEditingChange?.(true);
+		if (!options.isCapture || input.value.trim()) {
+			setEditing(true);
+		}
 		input.focus();
 	};
 

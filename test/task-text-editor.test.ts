@@ -14,6 +14,7 @@ class EditorElement {
 	children: EditorElement[] = [];
 	parent: EditorElement | undefined;
 	value = '';
+	readOnly = false;
 	text = '';
 	classes = new Set<string>();
 	attributes = new Map<string, string>();
@@ -108,6 +109,7 @@ const settleBlur = () => delay(0);
 
 function fixture({
 	isNew = false,
+	isCapture = false,
 	initialText = 'Original',
 	hasExistingChildren = true,
 	onCommit = vi.fn(async (_plan: TaskEditPlan) => {}),
@@ -127,6 +129,7 @@ function fixture({
 		rowEl: row as unknown as HTMLElement,
 		text: isNew ? '' : initialText,
 		isNew,
+		isCapture,
 		inputEl: captureInput as unknown as HTMLInputElement | undefined,
 		getSubtreeEnd: () => (hasExistingChildren ? savedChild : row) as unknown as HTMLElement,
 		renderText: (container, text) => {
@@ -279,8 +282,36 @@ describe('inline task editing session', () => {
 		expect(session.editingChanges.mock.calls).toEqual([[true], [false]]);
 	});
 
-	it('adopts a capture field, skips empty capture, and leaves composing Enter alone', async () => {
-		const session = fixture({ isNew: true });
+	it.each([{}, { shiftKey: true }, { ctrlKey: true }])(
+		'submits capture on Enter with %o and retains the focused input for another task',
+		async (modifiers) => {
+			const session = fixture({ isNew: true, isCapture: true });
+			const capture = session.input();
+			capture.value = 'Captured';
+			session.key('Enter', modifiers);
+			await settleBlur();
+			expect(session.onCommit).toHaveBeenCalledExactlyOnceWith({
+				text: 'Captured',
+				children: [],
+				siblings: [],
+			});
+			expect(session.input()).toBe(capture);
+			expect(capture.value).toBe('');
+			expect(session.list.children).toHaveLength(3);
+			capture.value = 'Another';
+			session.key('Enter', modifiers);
+			await settleBlur();
+			expect(session.onCommit).toHaveBeenCalledTimes(2);
+			expect(session.onCommit).toHaveBeenLastCalledWith({
+				text: 'Another',
+				children: [],
+				siblings: [],
+			});
+		},
+	);
+
+	it('keeps an empty capture visible through Enter, blur and composition without saving', async () => {
+		const session = fixture({ isNew: true, isCapture: true });
 		const capture = session.input();
 		expect(
 			session.key('Enter', { isComposing: true, shiftKey: true }).preventDefault,
@@ -289,20 +320,84 @@ describe('inline task editing session', () => {
 			session.key('Enter', { keyCode: 229, ctrlKey: true }).preventDefault,
 		).not.toHaveBeenCalled();
 		expect(session.input()).toBe(capture);
-		await session.editor.commit();
+		for (const modifiers of [{}, { shiftKey: true }, { ctrlKey: true }]) {
+			session.key('Enter', modifiers);
+		}
+		session.outside.focus();
+		await settleBlur();
 		expect(session.onCommit).not.toHaveBeenCalled();
-		session.editor.open();
-		capture.value = 'Captured';
-		session.key('Enter', { ctrlKey: true });
-		session.input().value = 'Another';
-		await session.editor.commit();
-		expect(capture.value).toBe('');
-		expect(session.onCommit).toHaveBeenCalledExactlyOnceWith({
-			text: 'Captured',
-			children: [],
-			siblings: [{ text: 'Another', children: [] }],
-		});
+		expect(session.row.style.getPropertyValue('display')).toBe('');
+		expect(session.label.children).toContain(capture);
+		expect(session.list.children).toHaveLength(3);
+		capture.focus();
+		capture.value = 'Composition';
+		session.key('Enter', { isComposing: true });
+		expect(session.onCommit).not.toHaveBeenCalled();
 	});
+
+	it('serializes capture submissions and preserves failed text for a focused retry', async () => {
+		let rejectSave: (error: Error) => void = () => {};
+		const onCommit = vi.fn(
+			(_plan: TaskEditPlan) =>
+				// eslint-disable-next-line promise/avoid-new
+				new Promise<void>((_resolve, reject) => {
+					rejectSave = reject;
+				}),
+		);
+		const session = fixture({ isNew: true, isCapture: true, onCommit });
+		const capture = session.input();
+		capture.value = 'Keep this';
+		session.key('Enter');
+		session.key('Enter', { ctrlKey: true });
+		session.key('Enter', { shiftKey: true });
+		expect(onCommit).toHaveBeenCalledOnce();
+		expect(capture.readOnly).toBe(true);
+		rejectSave(new Error('Vault unavailable'));
+		await settleBlur();
+		expect(capture.value).toBe('Keep this');
+		expect(capture.readOnly).toBe(false);
+		expect(session.input()).toBe(capture);
+		onCommit.mockResolvedValueOnce();
+		session.key('Enter');
+		await settleBlur();
+		expect(onCommit).toHaveBeenCalledTimes(2);
+		expect(capture.value).toBe('');
+		expect(session.input()).toBe(capture);
+	});
+
+	it.each(['blur', 'dispose'])(
+		'does not reclaim focus when a capture save finishes after %s',
+		async (action) => {
+			let resolveSave = () => {};
+			const onCommit = vi.fn(
+				(_plan: TaskEditPlan) =>
+					// eslint-disable-next-line promise/avoid-new
+					new Promise<void>((resolve) => {
+						resolveSave = resolve;
+					}),
+			);
+			const session = fixture({ isNew: true, isCapture: true, onCommit });
+			const capture = session.input();
+			capture.value = 'Saved while leaving';
+			session.key('Enter');
+			if (action === 'dispose') {
+				session.editor.dispose();
+			}
+			session.outside.focus();
+			resolveSave();
+			await settleBlur();
+			expect(session.input()).toBe(session.outside);
+			expect(onCommit).toHaveBeenCalledOnce();
+			if (action === 'blur') {
+				capture.focus();
+				capture.value = 'Next task';
+				onCommit.mockResolvedValueOnce();
+				session.key('Enter');
+				await settleBlur();
+				expect(onCommit).toHaveBeenCalledTimes(2);
+			}
+		},
+	);
 
 	it('retains the complete draft tree after a failed write and retries the same work', async () => {
 		const onCommit = vi.fn(async (_plan: TaskEditPlan) => {});

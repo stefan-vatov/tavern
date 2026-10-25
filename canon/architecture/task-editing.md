@@ -12,12 +12,13 @@ related:
   - ./daily-log.md
   - ./persistence.md
   - ../decisions/2026-10-24-task-keyboard-editing.md
+  - ../decisions/2026-10-25-persistent-task-capture.md
 ---
 
 # Task editing and deletion
 
 Project, queue, search-result, and daily-log task editors share the same keyboard
-behavior, including task capture fields. Ctrl+Enter creates a new sibling below
+behavior for inline editing. Ctrl+Enter creates a new sibling below
 the current task's group and focuses its text. Shift+Enter creates a new nested
 subitem beneath the current task and focuses its text. Plain Enter changes
 nothing. Composition input must not accidentally create tasks. Escape cancels
@@ -28,7 +29,16 @@ focus between its rows keeps the session open. New blank drafts remain UI state;
 abandoning them must not leave blank task lines in Markdown. Background note
 refreshes must preserve the active editor, its text, and keyboard focus.
 
-An empty row is removed when it loses focus. Its existing subitems survive and
+Permanent add-task fields in projects and Captain's Log remain available even
+when empty or after losing focus. Enter, Shift+Enter, and Ctrl+Enter submit
+nonempty text as one task, clear the field after success, and leave it ready
+for another entry. The input retains focus when it still owns focus; a late
+save must not take focus back from another control. Empty submissions create
+no Markdown task. Composition input must not submit. Background refreshes show
+saved tasks while preserving the next capture draft and its focus. Failed saves
+retain the text for retry.
+
+An empty inline task row is removed when it loses focus. Its existing subitems survive and
 move up one level, retaining their relative nesting and order. This cleanup
 removes only that row, matching Delete item. Propagation to linked items follows
 the [linked-unit contract](daily-log.md); children that survive an item deletion

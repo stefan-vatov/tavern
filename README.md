@@ -48,14 +48,18 @@ Tavern settings with a comma-separated list.
 ## Fast task editing
 
 Click a task's text to edit it. The same shortcuts work in projects, queues,
-search results, and the daily log, including the task capture fields:
+search results, and the daily log:
 
 - **Ctrl+Enter** creates a sibling underneath and focuses it.
 - **Shift+Enter** creates a nested subitem and focuses it.
 - **Enter** leaves the text and focus unchanged.
 - **Escape** cancels the editing session.
 
-Leaving the editor saves your work. Blank rows disappear when they lose focus;
+The bottom **Add a todo…** and **Add task to…** fields stay available even
+when empty. Press **Enter**, **Shift+Enter**, or **Ctrl+Enter** there to save
+one task and keep typing the next. A failed save keeps your text for retry.
+
+Leaving an inline editor saves your work. Blank inline rows disappear when they lose focus;
 if a cleared parent has subitems, they move up one level. New blank drafts stay
 in the interface until they have text, so abandoned entries leave no empty task
 lines in the note. Right-click a task in Captain's Log, a project, or a queue
@@ -70,6 +74,7 @@ a recovery dialog keeps the unsaved task text available to copy as Markdown.
 ## Daily Log
 
 The split view keeps the selected queue or project beside **Captain's Log**.
+The log hides the daily note's **Notes** section, keeping its Markdown intact.
 Opening Tavern loads today's log using your local date, even if you last viewed
 another day. Use the date controls to browse other days or return to **Today**.
 If the selected day's note is missing, Tavern shows **No note** and **Create daily

@@ -739,7 +739,7 @@
 	grid-template-columns: minmax(0, 1fr) 28px;
 	gap: 6px;
 	align-items: center;
-	margin-top: 8px;
+	margin-top: 12px;
 	padding: 0 8px;
 }
 .tavern-container .tavern-add-task-input {
@@ -1364,7 +1364,8 @@
 	align-items: center;
 	gap: 10px;
 	min-height: 36px;
-	margin-top: 10px;
+	margin-top: 12px;
+	margin-bottom: 8px;
 	padding: 5px 7px;
 	border-radius: 4px;
 }
