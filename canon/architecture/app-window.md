@@ -55,6 +55,7 @@ navigation state does not replace the independent Markdown content.
 
 ## Local desktop validation
 
+Every visual or other UI change is tested in the real Obsidian interface.
 Automated Linux UI validation runs outside the user's desktop in an isolated
 profile on a headless display. Launching Obsidian, opening Tavern, interacting
 with it, and reloading the test plugin must not create windows on the user's

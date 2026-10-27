@@ -585,6 +585,18 @@
 	color: #9bb7e0;
 	text-decoration: underline;
 }
+.tavern-container .tavern-internal-link {
+	color: var(--link-color, var(--text-accent));
+	text-decoration: var(--link-decoration, underline);
+}
+.tavern-container .tavern-internal-link:hover {
+	color: var(--link-color-hover, var(--text-accent-hover));
+}
+.tavern-container .tavern-internal-link.is-unresolved {
+	color: var(--link-unresolved-color, var(--link-color, var(--text-accent)));
+	opacity: var(--link-unresolved-opacity, 0.7);
+	text-decoration: var(--link-unresolved-decoration, underline);
+}
 .tavern-editable-task-text.is-editing {
 	overflow: visible;
 }

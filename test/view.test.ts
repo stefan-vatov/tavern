@@ -170,6 +170,10 @@ class FakeElement {
 		return this === element || this.children.some((child) => child.contains(element));
 	}
 
+	querySelectorAll(selector: string): FakeElement[] {
+		return allElements(this).filter((element) => element.classes.has(selector.slice(1)));
+	}
+
 	dispatch(type: string, event: Record<string, unknown> = {}): void {
 		const normalizedEvent = {
 			preventDefault: vi.fn(),
@@ -441,6 +445,7 @@ vi.mock('../src/task-search-service', async () => {
 });
 
 vi.mock('obsidian', () => ({
+	getLinkpath: (text: string) => text.split('#')[0],
 	Component: class {
 		private children: { unload(): void }[] = [];
 		addChild<Child extends { unload(): void }>(child: Child): Child {
@@ -2070,6 +2075,44 @@ tavern: project
 			'[opensrc \\| Source Code for AI Coding Agents](https://opensrc.sh)',
 		);
 		expect(stopPropagation).toHaveBeenCalledTimes(1);
+	});
+
+	it('renders internal links with note-aware state while preserving task editing', async () => {
+		const source = '04_Projects/Pi.md';
+		const task = 'See [[Folder/Existing#Heading|the note]] and [[Missing]] with `[[literal]]`';
+		const files = { [source]: PROJECT_MARKDOWN.replace('Build board', task) };
+		const view = new TavernView({} as never, {
+			saveSettings: vi.fn(),
+			settings: { boardTaskKeys: [], projectFolders: ['04_Projects'], tavernName: 'Tavern' },
+			vault: createVault(files),
+		});
+		const resolve = vi.fn((path: string) => {
+			if (path === 'Folder/Existing') {
+				return { path };
+			}
+			return null;
+		});
+		const open = vi.fn(async () => {});
+		Object.assign(view.app, {
+			metadataCache: { getFirstLinkpathDest: resolve },
+			workspace: { openLinkText: open },
+		});
+		await view.setState({ mode: 'note', selectedPath: source }, { history: false });
+		const root = rootElements.at(-1) as FakeElement;
+		const existing = findByHref(root, 'Folder/Existing#Heading');
+		const missing = findByHref(root, 'Missing');
+		expect(existing?.text).toBe('the note');
+		expect(existing?.classes.has('is-unresolved')).toBe(false);
+		expect(missing?.text).toBe('Missing');
+		expect(missing?.classes.has('is-unresolved')).toBe(true);
+		expect(findByHref(root, 'literal')).toBeUndefined();
+		expect(textValues(root)).toContain(' with `[[literal]]`');
+		expect(resolve).toHaveBeenCalledWith('Folder/Existing', source);
+		existing!.dispatch('click', { ctrlKey: true });
+		expect(open).toHaveBeenCalledWith('Folder/Existing#Heading', source, true);
+		const label = existing!.parent!;
+		label.dispatch('click');
+		expect(findByAriaLabel(root, `Task text for ${task}`)?.value).toBe(task);
 	});
 
 	it('should edit global queue task text in its source project', async () => {
@@ -4477,6 +4520,35 @@ tavern: project
 			expect(controller.create).not.toHaveBeenCalled();
 			findByText(root, 'Create daily log')!.dispatch('click');
 			await vi.waitFor(() => expect(controller.create).toHaveBeenCalledWith('2026-10-24'));
+		});
+
+		it('renders and refreshes daily task and prose links using the daily note as their source', async () => {
+			const controller = createDailyController(
+				'## General\n### [[Heading|Plan]]\nSee [[Reference|the reference]].\n- [ ] Open [[Missing]]\n',
+			);
+			const view = dailyView(controller);
+			let missingExists = false;
+			const resolve = vi.fn((path: string) => {
+				if (path === 'Missing' && !missingExists) {
+					return null;
+				}
+				return { path };
+			});
+			Object.assign(view.app, {
+				metadataCache: { getFirstLinkpathDest: resolve },
+				workspace: { openLinkText: vi.fn() },
+			});
+			await view.onOpen();
+			const root = rootElements.at(-1)!;
+			await vi.waitFor(() => expect(findByHref(root, 'Missing')).toBeDefined());
+			const missing = findByHref(root, 'Missing')!;
+			expect(missing.classes.has('is-unresolved')).toBe(true);
+			expect(findByHref(root, 'Heading')?.text).toBe('Plan');
+			expect(findByHref(root, 'Reference')?.text).toBe('the reference');
+			expect(resolve).toHaveBeenCalledWith('Missing', 'logs/2026-10-24.md');
+			missingExists = true;
+			await view.refreshProjects();
+			await vi.waitFor(() => expect(missing.classes.has('is-unresolved')).toBe(false));
 		});
 
 		it('keeps a failed creation visible through vault refreshes and clears it after a successful retry', async () => {

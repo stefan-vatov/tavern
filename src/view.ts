@@ -1,6 +1,15 @@
 /* eslint-disable eslint/func-style, eslint/max-lines, eslint/max-statements, eslint/no-magic-numbers */
 import { Effect, Exit } from 'effect';
-import { Component, ItemView, Menu, Notice, Scope, setIcon, type WorkspaceLeaf } from 'obsidian';
+import {
+	Component,
+	getLinkpath,
+	ItemView,
+	Menu,
+	Notice,
+	Scope,
+	setIcon,
+	type WorkspaceLeaf,
+} from 'obsidian';
 import { addTaskToFocusQueue, createProjectBoardModel } from './project-board-model';
 import type { DailyLogController } from './daily-log-controller';
 import DailyLogPane from './daily-log-pane';
@@ -74,6 +83,7 @@ type TavernViewDeps = {
 
 type TaskTextEditorOptions = {
 	task?: ProjectBoardTask;
+	sourcePath?: string;
 	onSave?: (plan: TaskEditPlan) => Promise<void>;
 	depth?: number;
 };
@@ -467,6 +477,12 @@ class TavernView extends ItemView {
 				},
 				renderTaskText: (container, text, options) => {
 					this.renderEditableTaskText(container, text, options);
+				},
+				renderText: (container, text, path) => this.renderInlineTaskMarkdown(container, text, path),
+				refreshLinks: (container, path) => {
+					container.querySelectorAll<HTMLElement>('.tavern-internal-link').forEach((link) => {
+						this.updateInternalLinkState(link, link.getAttribute('data-href') ?? '', path);
+					});
 				},
 				bindCapture: (row, input, onSave) => this.bindTaskCapture(row, input, onSave),
 			}),
@@ -1248,7 +1264,12 @@ class TavernView extends ItemView {
 			const visibleTasks = new Set(filteredTasks);
 			const sectionEl = containerEl.createDiv('tavern-project-section');
 			const sectionHeader = sectionEl.createDiv('tavern-project-section-header');
-			sectionHeader.createDiv({ cls: 'tavern-project-section-title', text: section.name });
+			const title = sectionHeader.createDiv({ cls: 'tavern-project-section-title' });
+			if (section.name.includes('[[')) {
+				this.renderInlineTaskMarkdown(title, section.name, project.path);
+			} else {
+				title.setText(section.name);
+			}
 			sectionHeader.createSpan({
 				cls: 'tavern-project-section-count',
 				text: `${filteredTasks.length}`,
@@ -1271,7 +1292,7 @@ class TavernView extends ItemView {
 			let renderedTaskCount = 0;
 			for (const line of section.lines) {
 				if (line.type === 'text') {
-					this.renderMarkdownLine(sectionEl, line.raw);
+					this.renderMarkdownLine(sectionEl, line.raw, project.path);
 				} else if (visibleTasks.has(line.task)) {
 					this.renderTask(sectionEl, project, line.task);
 					renderedTaskCount += 1;
@@ -1367,19 +1388,23 @@ class TavernView extends ItemView {
 		});
 	}
 
-	private renderMarkdownLine(containerEl: HTMLElement, raw: string): void {
+	private renderMarkdownLine(containerEl: HTMLElement, raw: string, sourcePath: string): void {
 		const trimmed = raw.trim();
 		if (trimmed.length === 0 || trimmed.startsWith('# ')) {
 			return;
 		}
 
-		containerEl.createDiv({ cls: 'tavern-markdown-line', text: this.formatMarkdownText(trimmed) });
+		const text = this.formatMarkdownText(trimmed);
+		const line = containerEl.createDiv({ cls: 'tavern-markdown-line' });
+		if (text.includes('[[')) {
+			this.renderInlineTaskMarkdown(line, text, sourcePath);
+		} else {
+			line.setText(text);
+		}
 	}
 
 	private formatMarkdownText(markdown: string): string {
 		return markdown
-			.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2')
-			.replace(/\[\[([^\]]+)\]\]/g, '$1')
 			.replace(/^⇱\s*/, '')
 			.replace(/\s*▴$/, '')
 			.trim();
@@ -1573,7 +1598,11 @@ class TavernView extends ItemView {
 			text,
 			depth,
 			renderText: (container, value) =>
-				this.renderInlineTaskMarkdown(container, value || 'Untitled task'),
+				this.renderInlineTaskMarkdown(
+					container,
+					value || 'Untitled task',
+					options.sourcePath ?? options.task?.projectPath ?? '',
+				),
 			getSubtreeEnd: () => this.taskSubtreeEnd(row, depth),
 			createDraftRow: (after, nextDepth) => this.createTaskDraftRow(after, nextDepth),
 			onCommit: (plan) =>
@@ -1703,7 +1732,11 @@ class TavernView extends ItemView {
 		await Promise.all([...this.activeEditors].map((editor) => editor.commit()));
 	}
 
-	private renderInlineTaskMarkdown(containerEl: HTMLElement, text: string): void {
+	private renderInlineTaskMarkdown(
+		containerEl: HTMLElement,
+		text: string,
+		sourcePath: string,
+	): void {
 		const segments = inlineMarkdownLinkSegments(text);
 		if (segments.length === 0) {
 			containerEl.createSpan({ text });
@@ -1713,6 +1746,22 @@ class TavernView extends ItemView {
 		for (const segment of segments) {
 			if (segment.type === 'text') {
 				containerEl.createSpan({ text: unescapeInlineMarkdownText(segment.text) });
+			} else if (segment.type === 'internal') {
+				const link = containerEl.createEl('a', {
+					attr: { href: segment.href, 'data-href': segment.href },
+					cls: 'internal-link tavern-internal-link',
+					text: segment.text,
+				});
+				this.updateInternalLinkState(link, segment.href, sourcePath);
+				link.addEventListener('click', (event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					void this.app.workspace.openLinkText(
+						segment.href,
+						sourcePath,
+						event.ctrlKey || event.metaKey,
+					);
+				});
 			} else {
 				const link = containerEl.createEl('a', {
 					attr: {
@@ -1725,6 +1774,15 @@ class TavernView extends ItemView {
 				});
 				link.addEventListener('click', (event) => event.stopPropagation());
 			}
+		}
+	}
+
+	private updateInternalLinkState(link: HTMLElement, target: string, sourcePath: string): void {
+		const path = getLinkpath(target);
+		if (path === '' || this.app.metadataCache.getFirstLinkpathDest(path, sourcePath)) {
+			link.removeClass('is-unresolved');
+		} else {
+			link.addClass('is-unresolved');
 		}
 	}
 
@@ -2443,10 +2501,11 @@ type InlineMarkdownSegment =
 	| {
 			href: string;
 			text: string;
-			type: 'link';
+			type: 'link' | 'internal';
 	  };
 
-const MARKDOWN_LINK_PATTERN = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+const MARKDOWN_LINK_PATTERN =
+	/\\.|(`+)([^\n]*?)\1|\[\[([^\]\n]+)\]\]|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
 const INLINE_MARKDOWN_ESCAPE_PATTERN = /\\([\\`*_[\]{}()#+\-.!|>])/g;
 
 const unescapeInlineMarkdownText = (text: string): string =>
@@ -2457,13 +2516,18 @@ const inlineMarkdownLinkSegments = (text: string): InlineMarkdownSegment[] => {
 	let cursor = 0;
 
 	for (const match of text.matchAll(MARKDOWN_LINK_PATTERN)) {
-		const [raw, label, href] = match;
-		if (label && href) {
+		const [raw, , , wiki, label, href] = match;
+		if ((wiki && !(match.index && text[match.index - 1] === '!')) || (label && href)) {
 			const index = match.index ?? 0;
 			if (index > cursor) {
 				segments.push({ text: text.slice(cursor, index), type: 'text' });
 			}
-			segments.push({ href, text: label, type: 'link' });
+			if (wiki) {
+				const [target, alias] = wiki.split('|', 2);
+				segments.push({ href: target!, text: alias ?? target!, type: 'internal' });
+			} else {
+				segments.push({ href: href!, text: label!, type: 'link' });
+			}
 			cursor = index + raw.length;
 		}
 	}

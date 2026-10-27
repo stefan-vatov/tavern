@@ -64,6 +64,12 @@ saving, cancellation, and blank-row cleanup follow the
 [shared task-editing contract](task-editing.md). Markdown links in task text remain clickable. Clicking
 elsewhere on a search result continues to open its source project.
 
+In task rows and visible project and daily-note text, Obsidian internal links
+display their label without wiki-link brackets. They use the active Obsidian
+theme's resolved or unresolved link styling and open through Obsidian using
+the source note's path. Link aliases and subpaths remain usable. Editing keeps
+the original Markdown unchanged unless the user edits it.
+
 ## Motion feedback
 
 Switching between the global queue and a project uses a brief detail-panel

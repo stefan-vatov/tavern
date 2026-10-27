@@ -27,8 +27,10 @@ create visible test windows unless the user explicitly requests a visible
 session. Build test artifacts in the isolated session directory so development
 does not hot-reload a plugin linked into the user's running vault.
 
-When asked for local testing, computer use testing, or testing Tavern in Obsidian,
-read [the local-testing guide](docs/local-testing.md) before launching anything.
+For every visual or other UI change, test the real interface in headless
+Obsidian. Also do this when asked for local testing, computer use testing, or
+testing Tavern in Obsidian. Read [the local-testing guide](docs/local-testing.md)
+before launching anything.
 Follow its session reuse, fixture setup, real UI checks, window-reuse regression,
 and cleanup procedure. The guide covers the native computer-use path and the
 local CDP fallback; report which was actually used.
@@ -43,6 +45,8 @@ local CDP fallback; report which was actually used.
 - Avoid Node or Electron APIs unless the plugin becomes desktop-only and `manifest.json` is updated.
 - Do not add network calls or telemetry without explicit product need and user-facing disclosure.
 - Keep settings defaults in `src/settings-defaults.ts` and persist with `loadData` / `saveData`.
+- After each complete, verified, self-contained slice, create a lowercase
+  conventional commit and push it to `main`.
 
 <!-- prettier-ignore-start -->
 

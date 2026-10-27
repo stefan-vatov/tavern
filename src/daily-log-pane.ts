@@ -28,8 +28,10 @@ interface DailyLogPaneOptions {
 	renderTaskText(
 		container: HTMLElement,
 		text: string,
-		options: { depth: number; onSave: (plan: TaskEditPlan) => Promise<void> },
+		options: { depth: number; sourcePath: string; onSave: (plan: TaskEditPlan) => Promise<void> },
 	): void;
+	renderText(container: HTMLElement, text: string, path: string): void;
+	refreshLinks(container: HTMLElement, path: string): void;
 }
 
 type DailyTaskReference = { day: string; id: string };
@@ -211,6 +213,7 @@ class DailyLogPane extends Component {
 			}),
 		});
 		if (layout === this.renderedLayout) {
+			this.options.refreshLinks(this.itemsEl, this.notePath);
 			for (const task of this.note?.tasks ?? []) {
 				this.updateTaskChecked(task);
 			}
@@ -242,16 +245,25 @@ class DailyLogPane extends Component {
 			.find((item) => item.level === 2);
 		for (const item of items!) {
 			if (item.type === 'heading') {
-				this.itemsEl.createEl(`h${item.level}` as 'h2', {
+				const heading = this.itemsEl.createEl(`h${item.level}` as 'h2', {
 					cls: `tavern-daily-heading is-level-${item.level}`,
-					text: item.text,
 				});
+				if (item.text.includes('[[')) {
+					this.options.renderText(heading, item.text, this.notePath);
+				} else {
+					heading.setText(item.text);
+				}
 			} else if (item.type === 'task') {
 				if (visible.has(item.task.id)) {
 					this.renderTask(item.task);
 				}
 			} else if (item.raw.trim() && (!firstSection || item.lineIndex > firstSection.lineIndex)) {
-				this.itemsEl.createDiv({ cls: 'tavern-daily-text', text: item.raw });
+				const line = this.itemsEl.createDiv({ cls: 'tavern-daily-text' });
+				if (item.raw.includes('[[')) {
+					this.options.renderText(line, item.raw, this.notePath);
+				} else {
+					line.setText(item.raw);
+				}
 			}
 		}
 		this.renderAddTask();
@@ -337,6 +349,7 @@ class DailyLogPane extends Component {
 		const text = row.createSpan('tavern-project-task-text');
 		this.options.renderTaskText(text, task.text, {
 			depth,
+			sourcePath: this.notePath,
 			onSave: async (plan) => {
 				try {
 					const { day } = reference;
