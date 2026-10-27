@@ -1,3 +1,9 @@
+## [1.9.3](https://github.com/stefan-vatov/tavern/compare/1.9.2...1.9.3) (2026-10-27)
+
+### Bug Fixes
+
+- carry daily tasks forward across gaps ([8d311d5](https://github.com/stefan-vatov/tavern/commit/8d311d58faddf591340b644bed1ec4201b8bb1ea))
+
 ## [1.9.2](https://github.com/stefan-vatov/tavern/compare/1.9.1...1.9.2) (2026-10-25)
 
 ### Performance Improvements
