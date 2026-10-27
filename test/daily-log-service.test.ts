@@ -2049,6 +2049,59 @@ describe('daily creation carry-forward', () => {
 		},
 	);
 
+	it('finds the latest earlier daily note containing tasks across gaps and taskless notes', async () => {
+		const state = await carryFixture();
+		const latestPath = 'Daily/2026/09/2026-09-29.md';
+		const olderPath = 'Daily/2025/12/2025-12-31.md';
+		const latest = '### Plan\n- [ ] Carry this ^carry\n  - [x] Keep child ^child\n';
+		const older = '### Plan\n- [ ] Leave older ^older\n';
+		state.vault.files.delete(dailyPath);
+		state.vault.files.set(latestPath, latest);
+		state.vault.files.set(olderPath, older);
+		state.vault.files.set('Daily/2026/10/2026-10-23.md', '### Notes\nNo tasks.\n');
+		state.vault.files.set('Daily/2026/10/2026-10-26.md', '- [ ] Future\n');
+		state.vault.files.set('Daily/2026/10/2026-09-30.md', '- [ ] Wrong folder\n');
+		await state.service.create(nextDay);
+		expect(state.vault.files.get(latestPath)).toBe('### Plan\n');
+		expect(state.vault.files.get(nextDailyPath)).toBe(
+			carryTemplate.replace(
+				'### Notes',
+				'- [ ] Carry this ^carry\n  - [x] Keep child ^child\n### Notes',
+			),
+		);
+		expect(state.vault.files.get(olderPath)).toBe(older);
+	});
+
+	it('reports an unreadable candidate rather than moving older work', async () => {
+		const state = await carryFixture();
+		const olderPath = 'Daily/2026/10/2026-10-20.md';
+		state.vault.files.set(olderPath, '- [ ] Older work\n');
+		state.vault.files.set(dailyPath, '- [ ] Recent work\n');
+		const read = state.vault.read.bind(state.vault);
+		vi.spyOn(state.vault, 'read').mockImplementation(async (file) => {
+			if (file.path === dailyPath) {
+				throw new Error('Read failed');
+			}
+			return read(file);
+		});
+		await expect(state.service.create(nextDay)).rejects.toThrow(
+			'carry-forward failed: Read failed',
+		);
+		expect(state.vault.files.get(olderPath)).toBe('- [ ] Older work\n');
+		expect(state.vault.files.get(nextDailyPath)).toBe(carryTemplate);
+	});
+
+	it('does not revive older unfinished work when the latest note with tasks is complete', async () => {
+		const state = await carryFixture();
+		const olderPath = 'Daily/2026/10/2026-10-20.md';
+		const older = '- [ ] Older work\n';
+		state.vault.files.set(olderPath, older);
+		state.vault.files.set(dailyPath, '- [x] Completed\n');
+		await state.service.create(nextDay);
+		expect(state.vault.files.get(nextDailyPath)).toBe(carryTemplate);
+		expect(state.vault.files.get(olderPath)).toBe(older);
+	});
+
 	it('relocates only selected daily source and copy endpoints and keeps edits and checking synchronized in both directions', async () => {
 		const state = await carryFixture();
 		const peerDay = '2026-10-20';
@@ -2132,7 +2185,7 @@ describe('daily creation carry-forward', () => {
 		expect(modify).not.toHaveBeenCalled();
 	});
 
-	it.each(['missing previous day', 'existing destination', 'template failure'] as const)(
+	it.each(['existing destination', 'template failure'] as const)(
 		'leaves older work untouched for %s',
 		async (scenario) => {
 			const state = await carryFixture();
@@ -2141,9 +2194,6 @@ describe('daily creation carry-forward', () => {
 			const older = '### Plan\n- [ ] Older work ^older\n';
 			state.vault.files.set(dailyPath, previous);
 			state.vault.files.set(olderPath, older);
-			if (scenario === 'missing previous day') {
-				state.vault.files.delete(dailyPath);
-			}
 			if (scenario === 'existing destination') {
 				state.vault.files.set(nextDailyPath, 'Existing note.\n');
 			}
@@ -2153,14 +2203,10 @@ describe('daily creation carry-forward', () => {
 				expect(state.vault.files.has(nextDailyPath)).toBe(false);
 			} else {
 				await state.service.create(nextDay);
-				expect(state.vault.files.get(nextDailyPath)).toBe(
-					scenario === 'existing destination' ? 'Existing note.\n' : carryTemplate,
-				);
+				expect(state.vault.files.get(nextDailyPath)).toBe('Existing note.\n');
 			}
 			expect(state.vault.files.get(olderPath)).toBe(older);
-			expect(state.vault.files.get(dailyPath)).toBe(
-				scenario === 'missing previous day' ? undefined : previous,
-			);
+			expect(state.vault.files.get(dailyPath)).toBe(previous);
 			if (scenario === 'existing destination') {
 				expect(state.render).not.toHaveBeenCalled();
 			}

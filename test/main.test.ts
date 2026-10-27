@@ -216,6 +216,7 @@ describe('Tavern app window', () => {
 			vault: {
 				on: vi.fn(),
 				read: async () => '# Daily log\n\n### Plan\n',
+				getMarkdownFiles: () => [...entries.values()].filter((entry) => entry instanceof TFile),
 				getRoot: () => new TFolder(),
 				getAbstractFileByPath: (path: string) => entries.get(path) ?? null,
 			},

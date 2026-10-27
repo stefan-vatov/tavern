@@ -107,14 +107,16 @@ the actual current date. Templates should leave the result at the configured
 daily-note path; if a script moves it, Tavern reports the resulting path rather
 than creating another note or undoing the script's changes.
 
-After the template finishes, creating a new log moves unfinished work from the
-previous calendar day's log into its `Plan` section. A whole task tree moves if
-any task in it is incomplete, including completed items within that tree. Fully
-completed trees stay in the previous note. When any tree carries forward, Tavern
-removes the new template’s exact `- [ ] Task` placeholder; otherwise it keeps it. Task text, nested details, block IDs,
-and links to projects and other copies stay intact; the moved tasks leave the
-previous log. If that exact previous day has no note, Tavern does not search
-older notes. Opening or creating an already existing log does not carry work again.
+After the template finishes, creating a new log finds the most recent earlier
+daily log containing tasks and moves its unfinished work into the new `Plan`
+section. Missing days and notes without tasks are skipped. A whole task tree
+moves if any task in it is incomplete, including completed items within that
+tree. Fully completed trees stay in the earlier note; if all its tasks are
+complete, Tavern does not move work from an older note. When any tree carries
+forward, Tavern removes the new template’s exact `- [ ] Task` placeholder;
+otherwise it keeps it. Task text, nested details, block IDs, and links to
+projects and other copies stay intact. Opening or creating an already existing
+log does not carry work again.
 
 If carry-forward fails after the template is created, Tavern shows the error and
 attempts to restore the transfer's note and link changes. The new template note

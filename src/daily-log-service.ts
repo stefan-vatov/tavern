@@ -6,7 +6,6 @@ import type {
 	DailyLogSnapshot,
 } from './daily-log-controller';
 import { addDailyTaskPlan, DailyLogStore } from './daily-log-store';
-import { shiftDay } from './daily-note';
 import { addProjectTaskPlan } from './project-actions';
 import {
 	LinkedTaskOperations,
@@ -58,14 +57,14 @@ class DailyLogService implements DailyLogController {
 			if (!(await this.store.create(day))) {
 				return;
 			}
-			const previousPath = this.store.path(shiftDay(day, -1));
-			if (!this.store.vault.getAbstractFileByPath(previousPath)) {
-				return;
-			}
 			const reference = { path: this.store.path(day), id: '' };
 			try {
+				const previousDay = await this.store.lastDayWithTasks(day);
+				if (!previousDay) {
+					return;
+				}
 				await this.operation(reference, (engine) =>
-					engine.carryForward(previousPath, reference.path),
+					engine.carryForward(this.store.path(previousDay), reference.path),
 				);
 			} catch (error) {
 				throw Object.assign(

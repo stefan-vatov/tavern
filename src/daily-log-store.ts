@@ -124,6 +124,30 @@ class DailyLogStore {
 		return { day, path, note: parseDailyNote(await this.vault.read(file)) };
 	}
 
+	async lastDayWithTasks(day: string): Promise<string | undefined> {
+		const candidates = this.vault.getMarkdownFiles().flatMap((file) => {
+			const [, candidate] = file.path.match(/(?:^|\/)(\d{4}-\d{2}-\d{2})\.md$/) ?? [];
+			if (!candidate || candidate >= day) {
+				return [];
+			}
+			try {
+				if (this.path(candidate) === file.path) {
+					return [{ day: candidate, file }];
+				}
+				return [];
+			} catch {
+				return [];
+			}
+		});
+		candidates.sort((left, right) => right.day.localeCompare(left.day));
+		for (const candidate of candidates) {
+			if (parseDailyNote(await this.vault.read(candidate.file)).tasks.length) {
+				return candidate.day;
+			}
+		}
+		return undefined;
+	}
+
 	async create(day: string): Promise<boolean> {
 		const path = this.path(day);
 		if (this.createNote) {

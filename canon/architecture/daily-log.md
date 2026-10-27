@@ -13,6 +13,7 @@ validation:
   - test/project-note.test.ts
   - test/view.test.ts
 related:
+  - ../decisions/2026-10-27-daily-carry-forward-source.md
   - ../decisions/2026-10-25-daily-carry-forward.md
   - ./task-transfers.md
   - ../decisions/2026-10-25-daily-log-template.md
@@ -78,13 +79,15 @@ counterparts; a separate sibling copy remains valid.
 
 ## Carry-forward on explicit creation
 
-After a new selected-day note is rendered successfully, move task trees from the
-immediately preceding calendar day's note into the new note's `Plan` section,
-after existing template content. A top-level tree moves if any task in it is
+After a new selected-day note is rendered successfully, find the most recent
+earlier daily note containing parsed tasks, skipping missing and taskless days.
+Move its task trees into the new note's `Plan` section after existing template
+content. A top-level tree moves if any task in it is
 incomplete; preserve its entire tree, including completed parents or descendants,
 raw task details, nesting, ordering, and block IDs. Fully completed trees and
-surrounding old-note content stay behind. Missing previous-day notes do not cause
-searches of older notes. Reading a note or invoking creation for an existing
+surrounding old-note content stay behind. If that note's trees are all complete,
+do not move work from an older note. Read failures stop carry-forward and are
+reported. Reading a note or invoking creation for an existing
 destination must not carry work again. This action introduces no task dates,
 scheduled creation, or recurrence.
 
