@@ -1,3 +1,9 @@
+## [1.9.4](https://github.com/stefan-vatov/tavern/compare/1.9.3...1.9.4) (2026-10-27)
+
+### Bug Fixes
+
+- render internal links in task and note text ([2d1bd6f](https://github.com/stefan-vatov/tavern/commit/2d1bd6f64cbccc72a2d1eaa1f0503942b415291e))
+
 ## [1.9.3](https://github.com/stefan-vatov/tavern/compare/1.9.2...1.9.3) (2026-10-27)
 
 ### Bug Fixes
