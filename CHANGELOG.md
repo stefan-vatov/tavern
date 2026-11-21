@@ -1,3 +1,9 @@
+# [1.10.0](https://github.com/stefan-vatov/tavern/compare/1.9.4...1.10.0) (2026-11-21)
+
+### Features
+
+- move unresolved daily tasks to today from any day ([984a7ec](https://github.com/stefan-vatov/tavern/commit/984a7ec9ce524261c590983df8541231fc5056c6))
+
 ## [1.9.4](https://github.com/stefan-vatov/tavern/compare/1.9.3...1.9.4) (2026-10-27)
 
 ### Bug Fixes
