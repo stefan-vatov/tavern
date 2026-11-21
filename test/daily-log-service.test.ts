@@ -2321,3 +2321,55 @@ describe('daily creation carry-forward', () => {
 		},
 	);
 });
+
+describe('moving unresolved tasks to today', () => {
+	const todayFixture = async () => {
+		const state = await fixture();
+		const store = new DailyLogStore(
+			state.vault,
+			() => 'Daily',
+			() => new Date(2026, 9, 25, 12),
+		);
+		return { ...state, service: new DailyLogService(store, state.options) };
+	};
+
+	it('moves unfinished trees from any earlier day into an existing today note', async () => {
+		const state = await todayFixture();
+		const open = '- [ ] Open ^open\n  - [x] Done child ^done-child\n';
+		state.vault.files.set(dailyPath, `### Plan\n${open}- [x] Finished ^finished\n`);
+		state.vault.files.set(nextDailyPath, '### Plan\n- [ ] Existing ^existing\n');
+		await state.service.moveUnresolvedToToday(day);
+		expect(state.vault.files.get(dailyPath)).toBe('### Plan\n- [x] Finished ^finished\n');
+		expect(state.vault.files.get(nextDailyPath)).toBe(
+			`### Plan\n- [ ] Existing ^existing\n${open}`,
+		);
+	});
+
+	it('creates a missing today note through the creation path, then moves unresolved trees', async () => {
+		const state = await todayFixture();
+		const render = vi.fn(async (path: string) => {
+			await state.vault.create(path, '# New day\n### Plan\n- [ ] Task\n');
+			return true;
+		});
+		const service = new DailyLogService(
+			new DailyLogStore(
+				state.vault,
+				() => 'Daily',
+				() => new Date(2026, 9, 25, 12),
+				render,
+			),
+			state.options,
+		);
+		const open = '- [ ] Open ^open\n  - [x] Done child ^done-child\n';
+		state.vault.files.set(dailyPath, `### Plan\n${open}- [x] Finished ^finished\n`);
+		await service.moveUnresolvedToToday(day);
+		expect(render).toHaveBeenCalledOnce();
+		expect(state.vault.files.get(dailyPath)).toBe('### Plan\n- [x] Finished ^finished\n');
+		expect(state.vault.files.get(nextDailyPath)).toBe(`# New day\n### Plan\n${open}`);
+	});
+
+	it('rejects today as the source', async () => {
+		const state = await todayFixture();
+		await expect(state.service.moveUnresolvedToToday(nextDay)).rejects.toThrow();
+	});
+});

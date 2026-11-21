@@ -76,6 +76,23 @@ class DailyLogService implements DailyLogController {
 			}
 		});
 	}
+	moveUnresolvedToToday(day: string): Promise<void> {
+		const today = this.store.today();
+		if (day === today) {
+			return Promise.reject(new Error("Today's tasks are already in today's log."));
+		}
+		return this.create(today).then(() =>
+			this.enqueue(async () => {
+				if (!(await this.store.read(day)).note) {
+					throw new Error(`There is no daily log for ${day}.`);
+				}
+				const reference = { path: this.store.path(today), id: '' };
+				await this.operation(reference, (engine) =>
+					engine.carryForward(this.store.path(day), reference.path),
+				);
+			}),
+		);
+	}
 	async addTask(day: string, text: string): Promise<void> {
 		if (!text.trim()) {
 			throw new Error('Task text was empty.');

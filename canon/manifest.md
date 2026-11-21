@@ -19,6 +19,7 @@ status: reference
 - [Send to Captain’s Log decision](decisions/2026-10-25-send-to-captains-log.md) — read for the human choices of linked copies, the displayed day, requiring an existing note, and revealing hidden copies in Plan.
 - [Return to Backlog decision](decisions/2026-10-25-return-to-backlog.md) — read for the human requirement to return daily trees to the displayed project and merge missing descendants without moving existing project items.
 - [Daily carry-forward source decision](decisions/2026-10-27-daily-carry-forward-source.md) — read for the human choice to carry work across gaps between daily notes.
+- [Move unresolved to today decision](decisions/2026-11-21-move-unresolved-to-today.md) — read for the human choices of an at-will move from any day, creating a missing today, and showing the action only for days with incomplete tasks.
 - [Daily carry-forward decision (history)](decisions/2026-10-25-daily-carry-forward.md) — read for the original previous-day choice and the requirement to retain whole mixed task trees.
 - [Daily template decision](decisions/2026-10-25-daily-log-template.md) — read for the human choices of a Tavern template-file setting and stopping on Templater failure.
 - [Linked task operations decision](decisions/2026-10-25-linked-task-operations.md) — read for the human requirement that all Tavern item operations and tree additions synchronize, creating missing destinations.

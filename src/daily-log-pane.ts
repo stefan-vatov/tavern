@@ -47,6 +47,7 @@ class DailyLogPane extends Component {
 	private active = true;
 	private revision = 0;
 	private note: DailyNote | null = null;
+	private moveButton: HTMLButtonElement | undefined = undefined;
 	private notePath = '';
 	private readonly taskReferencesSubscribed: boolean;
 	private renderedLayout = '';
@@ -115,6 +116,7 @@ class DailyLogPane extends Component {
 				return;
 			}
 			this.note = snapshot.note;
+			this.updateMoveButton();
 			this.notePath = snapshot.path;
 			this.renderContent();
 		} catch (error) {
@@ -128,8 +130,15 @@ class DailyLogPane extends Component {
 		this.options.onStateChange({ day: this.day, query: this.query });
 	}
 
+	private updateMoveButton(): void {
+		if (this.moveButton) {
+			this.moveButton.hidden = !this.note?.tasks.some((task) => !task.checked);
+		}
+	}
+
 	private renderHeader(): void {
 		this.header.empty();
+		this.moveButton = undefined;
 		this.header.createEl('h2', { cls: 'tavern-detail-title', text: "Captain's Log" });
 		this.header.createSpan({ cls: 'tavern-daily-date-chip', text: this.day });
 		const nav = this.header.createEl('nav', {
@@ -155,6 +164,20 @@ class DailyLogPane extends Component {
 			attr: { 'aria-label': 'Next day' },
 		});
 		const today = nav.createEl('button', { cls: 'tavern-daily-today', text: 'Today' });
+		if (this.day !== this.controller.today()) {
+			this.moveButton = nav.createEl('button', {
+				cls: 'tavern-daily-move-unresolved',
+				text: 'Move unresolved to today',
+				attr: { 'aria-label': 'Move unresolved tasks to today' },
+			});
+			this.registerDomEvent(
+				this.moveButton,
+				'click',
+				() =>
+					void this.mutate(() => this.controller.moveUnresolvedToToday(this.day), [], this.header),
+			);
+		}
+		this.updateMoveButton();
 		this.registerDomEvent(previous, 'click', () => void this.selectDay(shiftDay(this.day, -1)));
 		this.registerDomEvent(next, 'click', () => void this.selectDay(shiftDay(this.day, 1)));
 		this.registerDomEvent(today, 'click', () => void this.selectDay(this.controller.today()));

@@ -1365,7 +1365,21 @@
 	color: #9da3ab;
 	font-size: 11px;
 }
+.tavern-container .tavern-daily-move-unresolved {
+	height: auto;
+	margin-left: 8px;
+	padding: 4px 10px;
+	border: 1px solid #3d4147;
+	border-radius: 5px;
+	background: transparent;
+	color: #9da3ab;
+	font-size: 11px;
+}
 .tavern-container .tavern-daily-today:hover,
+.tavern-container .tavern-daily-move-unresolved[hidden] {
+	display: none;
+}
+.tavern-container .tavern-daily-move-unresolved:hover,
 .tavern-container .tavern-daily-create:hover {
 	border-color: #55749f;
 	background: #30343a;

@@ -13,6 +13,7 @@ validation:
   - test/project-note.test.ts
   - test/view.test.ts
 related:
+  - ../decisions/2026-11-21-move-unresolved-to-today.md
   - ../decisions/2026-10-27-daily-carry-forward-source.md
   - ../decisions/2026-10-25-daily-carry-forward.md
   - ./task-transfers.md
@@ -109,6 +110,18 @@ fails, report the failure in Tavern and attempt rollback of its note/reference
 changes. The newly rendered template note remains the destination baseline;
 arbitrary template side effects are not rolled back. No automatic retry into an
 existing note or new recovery policy for external concurrent edits is established.
+
+## Move unresolved to today
+
+Any displayed day other than today whose note has an incomplete task offers a
+**Move unresolved to today** action; it is hidden on today, on days without a
+note, and on days whose tasks are all complete. The action moves that day's
+trees into today's `Plan` under the carry-forward selection, preservation,
+placeholder, linked-identity, and rollback rules above. If today has no note,
+Tavern first creates it through the explicit-creation path, including its
+carry-forward, then moves the displayed day's remaining unresolved trees.
+Creation failures stop the move and are reported. The action introduces no task
+dates, scheduling, or recurrence.
 
 ## Task transfer menus
 

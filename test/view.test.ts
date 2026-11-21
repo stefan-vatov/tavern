@@ -703,6 +703,7 @@ const createDailyController = (markdown: string | null = DAILY_MARKDOWN) => ({
 		}),
 	),
 	create: vi.fn(async () => {}),
+	moveUnresolvedToToday: vi.fn(async () => {}),
 	addTask: vi.fn(async () => {}),
 	editTask: vi.fn(async () => {}),
 	addTaskPlan: vi.fn(async () => {}),
@@ -4588,6 +4589,44 @@ tavern: project
 			controller.today.mockReturnValue('2026-10-25');
 			await view.onOpen();
 			await vi.waitFor(() => expect(controller.read).toHaveBeenLastCalledWith('2026-10-25'));
+		});
+
+		it('offers moving unresolved tasks to today only on other days', async () => {
+			const controller = createDailyController();
+			const view = dailyView(controller);
+			await view.onOpen();
+			const root = rootElements.at(-1)!;
+			expect(findByAriaLabel(root, 'Move unresolved tasks to today')).toBeUndefined();
+			findByAriaLabel(root, 'Previous day')!.dispatch('click');
+			await vi.waitFor(() =>
+				expect(findByAriaLabel(root, 'Move unresolved tasks to today')).toBeDefined(),
+			);
+			expect(
+				(findByAriaLabel(root, 'Move unresolved tasks to today') as unknown as { hidden: boolean })
+					.hidden,
+			).toBe(false);
+			findByAriaLabel(root, 'Move unresolved tasks to today')!.dispatch('click');
+			await vi.waitFor(() =>
+				expect(controller.moveUnresolvedToToday).toHaveBeenCalledExactlyOnceWith('2026-10-23'),
+			);
+		});
+
+		it('hides the move-to-today button when the shown day has no unresolved tasks', async () => {
+			const controller = createDailyController('### Plan\n- [x] Done ^done\n');
+			const view = dailyView(controller);
+			await view.onOpen();
+			const root = rootElements.at(-1)!;
+			findByAriaLabel(root, 'Previous day')!.dispatch('click');
+			await vi.waitFor(() => expect(controller.read).toHaveBeenLastCalledWith('2026-10-23'));
+			await vi.waitFor(() =>
+				expect(
+					(
+						findByAriaLabel(root, 'Move unresolved tasks to today') as unknown as {
+							hidden: boolean;
+						}
+					).hidden,
+				).toBe(true),
+			);
 		});
 
 		it('hides the Notes subtree, renders later sections and retains capture while the log refreshes', async () => {

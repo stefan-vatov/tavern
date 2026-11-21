@@ -54,6 +54,7 @@ interface DailyLogController {
 	today(): string;
 	read(day: string): Promise<DailyLogSnapshot>;
 	create(day: string): Promise<void>;
+	moveUnresolvedToToday(day: string): Promise<void>;
 	addTask(day: string, text: string): Promise<void>;
 	addTaskPlan(day: string, plan: TaskEditPlan): Promise<Map<string, string> | void>;
 	editTaskPlan(
